@@ -140,43 +140,74 @@ function renderFrequencyChart() {
 }
 
 function renderHeatmap() {
-    const chart = echarts.init(document.getElementById("chartHeatmap"));
+    const el = document.getElementById("chartHeatmap");
+    const chart = echarts.init(el);
     const freq = dashboardData.frequency;
+    // 窄屏时只显示号码，避免"号码+次数"两行字挤在一起
+    const compact = el.clientWidth < 460;
 
-    // 7行7列的热力图 (1-49)
+    // 7 行 7 列布局：第 0 行在最底部（ECharts 类目 y 轴自下而上），号码 = row*7 + col + 1
+    //
+    // 【重要】数据项必须是 [x, y, value] 三元组。
+    // 这里曾经写成 [x, y, 次数, 号码]，而 visualMap 未指定 dimension，
+    // ECharts 就按"最后一个维度"上色 —— 那个维度恰好是号码本身，
+    // 导致颜色跟着号码大小走、而不是跟着出现次数走：
+    // 出现 46 次的高频号 1 显示成深蓝冷色，出现 36 次的 44 号反而是中间色。
     const data = [];
+    let minVal = Infinity, maxVal = -Infinity;
     for (let n = 1; n <= 49; n++) {
         const row = Math.floor((n - 1) / 7);
         const col = (n - 1) % 7;
-        data.push([col, row, freq[n] || 0, n]);
+        const cnt = freq[n] || 0;
+        data.push([col, row, cnt]);
+        if (cnt < minVal) minVal = cnt;
+        if (cnt > maxVal) maxVal = cnt;
     }
+    if (!isFinite(minVal)) { minVal = 0; maxVal = 1; }
 
-    const maxVal = Math.max(...Object.values(freq));
+    // 由格子坐标反推号码
+    const numOf = p => p.data[1] * 7 + p.data[0] + 1;
 
     chart.setOption({
         tooltip: {
-            formatter: p => `号码 ${p.data[3]}：出现 ${p.data[2]} 次`
+            formatter: p => `号码 <b>${numOf(p)}</b>：出现 <b>${p.data[2]}</b> 次`
         },
-        xAxis: { type: "category", data: ["", "", "", "", "", "", ""], show: false },
-        yAxis: { type: "category", data: ["", "", "", "", "", "", ""], show: false },
+        xAxis: { type: "category", data: Array(7).fill(""), show: false },
+        yAxis: { type: "category", data: Array(7).fill(""), show: false },
         visualMap: {
-            min: 0, max: maxVal,
-            inRange: { color: ["#1a1a2e", "#0ea5e9", "#e94560"] },
-            show: false
+            // 用实际次数区间做映射，冷热对比更明显
+            min: minVal,
+            max: maxVal,
+            dimension: 2,   // 关键：明确按第 3 个维度（出现次数）上色
+            inRange: { color: ["#1e293b", "#0ea5e9", "#f59e0b", "#e94560"] },
+            orient: "horizontal",
+            left: "center",
+            bottom: 2,
+            // 不指定 itemWidth/itemHeight：横向模式下 ECharts 会自行互换两者，
+            // 显式设成 140x12 反而得到一根竖条并压住中间格子。用默认值即可。
+            text: ["多（热）", "少（冷）"],
+            textStyle: { color: "#94a3b8", fontSize: 11 },
+            calculable: true,
         },
         series: [{
             type: "heatmap",
             data: data,
             label: {
                 show: true,
-                formatter: p => p.data[3],
-                color: "#e2e8f0",
-                fontSize: 14,
-                fontWeight: "bold"
+                formatter: p => compact
+                    ? `${numOf(p)}`
+                    : `{n|${numOf(p)}}\n{c|${p.data[2]}}`,
+                rich: {
+                    n: { color: "#ffffff", fontSize: 14, fontWeight: "bold", lineHeight: 17 },
+                    c: { color: "rgba(255,255,255,0.72)", fontSize: 10, lineHeight: 12 },
+                },
+                color: "#ffffff",
+                fontSize: compact ? 12 : 14,
+                fontWeight: "bold",
             },
             itemStyle: { borderColor: "#0f0f1a", borderWidth: 3, borderRadius: 6 },
         }],
-        grid: { left: 16, right: 16, top: 16, bottom: 16 },
+        grid: { left: 16, right: 16, top: 16, bottom: 46 },
     });
     window.addEventListener("resize", () => chart.resize());
 }
