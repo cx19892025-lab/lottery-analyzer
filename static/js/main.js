@@ -39,12 +39,14 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
         if (btn.dataset.tab === "history") loadHistory();
         if (btn.dataset.tab === "decoder") loadDecoderCategories();
         if (btn.dataset.tab === "backtest") loadBacktestTab();
+        if (btn.dataset.tab === "settings") loadSettings();
     });
 });
 
 // ==================== 页面初始化 ====================
 document.addEventListener("DOMContentLoaded", () => {
     loadDashboard();
+    refreshAiStatus();   // 启动即探测 AI 是否已配置，用于图猜码页的降级提示
 });
 
 // ==================== 仪表盘 ====================
@@ -794,6 +796,196 @@ function renderBtTable() {
     document.getElementById("btTable").innerHTML = head + `<tbody>${rows}</tbody>`;
 }
 
+// ==================== 设置页 ====================
+let settingsLoaded = false;
+let aiStatus = { available: false };
+
+async function refreshAiStatus() {
+    try {
+        const res = await fetch("/api/vision/status");
+        aiStatus = await res.json();
+    } catch (e) {
+        aiStatus = { available: false };
+    }
+    applyAiStatusToDecoder();
+    return aiStatus;
+}
+
+function applyAiStatusToDecoder() {
+    const warn = document.getElementById("aiWarning");
+    const zone = document.getElementById("uploadZone");
+    if (!warn || !zone) return;
+
+    if (aiStatus.available) {
+        warn.style.display = "none";
+        zone.classList.remove("disabled");
+    } else {
+        warn.style.display = "flex";
+        zone.classList.add("disabled");
+    }
+}
+
+function onUploadZoneClick() {
+    if (!aiStatus.available) {
+        // 未配置时不弹文件框，直接引导去设置页
+        gotoDecoderHint();
+        return;
+    }
+    document.getElementById("imageInput").click();
+}
+
+function gotoDecoderHint() {
+    const box = document.getElementById("decodeResult");
+    if (box) {
+        box.innerHTML = `<div class="result-display">
+            <div class="label" style="color:#f59e0b;">⚠️ AI 识图尚未启用</div>
+            <div class="label">请先到「⚙️ 设置」页填写接口地址与模型名，<br/>或直接在左侧手动选择元素后解码。</div>
+        </div>`;
+    }
+}
+
+function gotoSettings() {
+    const btn = document.querySelector('.tab-btn[data-tab="settings"]');
+    if (btn) btn.click();
+}
+
+async function loadSettings() {
+    const res = await fetch("/api/settings");
+    const s = await res.json();
+
+    document.getElementById("setBaseUrl").value = s.base_url || "";
+    document.getElementById("setModel").value = s.model || "";
+    document.getElementById("setTimeout").value = s.timeout;
+    document.getElementById("setMaxTokens").value = s.max_tokens;
+    // Key 永不回显明文
+    document.getElementById("setApiKey").value = "";
+    document.getElementById("keyStatusHint").textContent = s.has_api_key
+        ? `已保存 Key：${s.api_key_masked}（留空提交即保持不变）`
+        : "尚未保存任何 Key";
+
+    renderPresets(s.presets || []);
+    settingsLoaded = true;
+}
+
+function renderPresets(presets) {
+    const box = document.getElementById("presetGrid");
+    if (!box) return;
+    box.innerHTML = presets.map(p => `
+        <button type="button" class="preset-card" onclick="applyPreset('${p.id}')" data-preset="${p.id}">
+            <div class="preset-name">${p.name}</div>
+            <div class="preset-model">${p.model}</div>
+            <div class="preset-note">${p.note}</div>
+        </button>
+    `).join("");
+    box._presets = presets;
+}
+
+function applyPreset(id) {
+    const box = document.getElementById("presetGrid");
+    const p = (box._presets || []).find(x => x.id === id);
+    if (!p) return;
+
+    document.getElementById("setBaseUrl").value = p.base_url;
+    document.getElementById("setModel").value = p.model;
+    document.querySelectorAll(".preset-card").forEach(el => {
+        el.classList.toggle("active", el.dataset.preset === id);
+    });
+    showSettingsStatus("info", `已填入「${p.name}」的地址与模型名，请补上 API Key 后保存。`);
+}
+
+function toggleKeyVisibility() {
+    const input = document.getElementById("setApiKey");
+    const btn = document.getElementById("toggleKeyBtn");
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    btn.textContent = show ? "隐藏" : "显示";
+}
+
+function resetSettingsForm() {
+    loadSettings();
+    showSettingsStatus("info", "已重新载入已保存的配置。");
+}
+
+function showSettingsStatus(kind, msg) {
+    const box = document.getElementById("settingsStatus");
+    const color = kind === "ok" ? "#22c55e" : (kind === "err" ? "#ef4444" : "#f59e0b");
+    const icon = kind === "ok" ? "✅" : (kind === "err" ? "❌" : "ℹ️");
+    box.innerHTML = `<div class="settings-status" style="border-color:${color}; color:${color};">
+        ${icon} ${msg}
+    </div>`;
+}
+
+function collectSettingsForm() {
+    return {
+        base_url: document.getElementById("setBaseUrl").value.trim(),
+        api_key: document.getElementById("setApiKey").value.trim(),
+        model: document.getElementById("setModel").value.trim(),
+        timeout: document.getElementById("setTimeout").value,
+        max_tokens: document.getElementById("setMaxTokens").value,
+    };
+}
+
+async function saveSettings() {
+    const btn = document.getElementById("saveSettingsBtn");
+    const payload = collectSettingsForm();
+
+    if (!payload.base_url || !payload.model) {
+        showSettingsStatus("err", "接口地址与模型名都必须填写。");
+        return;
+    }
+
+    btn.disabled = true;
+    try {
+        const res = await fetch("/api/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            showSettingsStatus("err", data.error || "保存失败");
+            return;
+        }
+        showSettingsStatus("ok", "设置已保存到 data/settings.json");
+        await loadSettings();
+        await refreshAiStatus();
+    } catch (e) {
+        showSettingsStatus("err", `保存失败：${e.message}`);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function testSettings() {
+    const btn = document.getElementById("testSettingsBtn");
+    const payload = collectSettingsForm();
+
+    if (!payload.base_url || !payload.model) {
+        showSettingsStatus("err", "请先填写接口地址与模型名。");
+        return;
+    }
+
+    btn.disabled = true;
+    showSettingsStatus("info", "正在测试连接，请稍候...");
+    try {
+        const res = await fetch("/api/settings/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (data.ok) {
+            showSettingsStatus("ok", data.message || "连接成功");
+        } else {
+            showSettingsStatus("err", data.error || "连接失败");
+        }
+    } catch (e) {
+        showSettingsStatus("err", `测试失败：${e.message}`);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
 // ==================== 图猜码 ====================
 let decoderCategoriesLoaded = false;
 let uploadedImageB64 = null;
@@ -840,6 +1032,10 @@ function initDragDrop() {
     zone.addEventListener("drop", (e) => {
         e.preventDefault();
         zone.classList.remove("dragover");
+        if (!aiStatus.available) {
+            gotoDecoderHint();
+            return;
+        }
         const files = e.dataTransfer.files;
         if (files.length > 0 && files[0].type.startsWith("image/")) {
             processImageFile(files[0]);
@@ -855,6 +1051,10 @@ function handleImageUpload(event) {
 }
 
 function processImageFile(file) {
+    if (!aiStatus.available) {
+        gotoDecoderHint();
+        return;
+    }
     const reader = new FileReader();
     reader.onload = async (e) => {
         const dataUrl = e.target.result;
@@ -902,7 +1102,11 @@ async function doVisionDecode(imageDataUrl, mimeType) {
 
         if (!res.ok) {
             const err = await res.json();
-            resultDiv.innerHTML = `<div class="result-display"><div class="label" style="color:#ef4444;">❌ ${err.error || '分析失败'}</div></div>`;
+            const isConfig = res.status === 503;
+            resultDiv.innerHTML = `<div class="result-display">
+                <div class="label" style="color:#ef4444;">❌ ${err.error || '分析失败'}</div>
+                ${isConfig ? '<button type="button" class="mini-btn" onclick="gotoSettings()">去设置</button>' : ''}
+            </div>`;
             return;
         }
 

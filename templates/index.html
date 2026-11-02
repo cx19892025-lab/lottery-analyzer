@@ -25,6 +25,7 @@
         <button class="tab-btn" data-tab="recommend">🎲 智能选号</button>
         <button class="tab-btn" data-tab="backtest">📈 策略回测</button>
         <button class="tab-btn" data-tab="decoder">🖼️ 图猜码</button>
+        <button class="tab-btn" data-tab="settings">⚙️ 设置</button>
     </nav>
 
     <!-- ==================== 主内容区 ==================== -->
@@ -222,8 +223,14 @@
                 <div class="card">
                     <div class="card-title"><span class="icon">🖼️</span> 图猜码解码器</div>
 
+                    <!-- 未配置 AI 时的提示条 -->
+                    <div class="ai-warning" id="aiWarning" style="display:none;">
+                        <span>⚠️ <b>AI 识图未启用</b>：尚未配置接口。下方<b>手动选择元素</b>的解码功能照常可用。</span>
+                        <button type="button" class="mini-btn" onclick="gotoSettings()">去设置</button>
+                    </div>
+
                     <!-- AI 图片上传区 -->
-                    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('imageInput').click()">
+                    <div class="upload-zone" id="uploadZone" onclick="onUploadZoneClick()">
                         <input type="file" id="imageInput" accept="image/*" style="display:none" onchange="handleImageUpload(event)" />
                         <div id="uploadContent">
                             <div style="font-size:48px; margin-bottom:12px;">📷</div>
@@ -280,6 +287,81 @@
                         <div class="trace-item" style="color:var(--text-secondary);">等待解码...</div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- ===== Tab: 设置 ===== -->
+        <div class="tab-panel" id="panel-settings">
+            <div class="card">
+                <div class="card-title"><span class="icon">⚙️</span> AI 接口设置</div>
+
+                <div class="settings-note">
+                    图猜码的「AI 识图」需要一个<b>支持视觉的 OpenAI 兼容接口</b>。
+                    接口地址、API Key、模型名全部由你自己填写，本工具不内置任何第三方密钥，
+                    也不依赖本机的任何外部脚本。
+                </div>
+
+                <!-- 服务商预设 -->
+                <div class="settings-section">
+                    <div class="settings-label">① 快速选择服务商（点一下自动填地址与模型名）</div>
+                    <div class="preset-grid" id="presetGrid"></div>
+                </div>
+
+                <!-- 表单 -->
+                <div class="settings-section">
+                    <div class="settings-label">② 填写接口信息</div>
+
+                    <div class="settings-field">
+                        <label for="setBaseUrl">接口地址 (Base URL)</label>
+                        <input type="text" id="setBaseUrl" placeholder="https://api.deepseek.com/v1" autocomplete="off" />
+                        <div class="settings-hint">OpenAI 兼容地址，通常以 <code>/v1</code> 结尾</div>
+                    </div>
+
+                    <div class="settings-field">
+                        <label for="setApiKey">API Key</label>
+                        <div class="key-row">
+                            <input type="password" id="setApiKey" placeholder="留空表示不修改已保存的 Key" autocomplete="off" />
+                            <button type="button" class="mini-btn" id="toggleKeyBtn" onclick="toggleKeyVisibility()">显示</button>
+                        </div>
+                        <div class="settings-hint" id="keyStatusHint">尚未保存任何 Key</div>
+                    </div>
+
+                    <div class="settings-field">
+                        <label for="setModel">模型名</label>
+                        <input type="text" id="setModel" placeholder="deepseek-chat / glm-4v-flash / qwen-vl-max" autocomplete="off" />
+                        <div class="settings-hint">必须选<b>支持图片输入</b>的模型，纯文本模型无法识别玄机图</div>
+                    </div>
+
+                    <div class="settings-field-row">
+                        <div class="settings-field">
+                            <label for="setTimeout">超时（秒）</label>
+                            <input type="number" id="setTimeout" min="5" max="300" step="5" />
+                        </div>
+                        <div class="settings-field">
+                            <label for="setMaxTokens">最大回复长度</label>
+                            <input type="number" id="setMaxTokens" min="128" max="8192" step="128" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 操作 -->
+                <div class="settings-actions">
+                    <button class="generate-btn" id="saveSettingsBtn" onclick="saveSettings()">💾 保存设置</button>
+                    <button class="ghost-btn" id="testSettingsBtn" onclick="testSettings()">🔌 测试连接</button>
+                    <button class="ghost-btn" onclick="resetSettingsForm()">↩️ 重新载入</button>
+                </div>
+
+                <div id="settingsStatus"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="icon">🛡️</span> 安全说明</div>
+                <ul class="settings-safety">
+                    <li>配置保存在项目目录下的 <code>data/settings.json</code>，该文件已加入 <code>.gitignore</code>，<b>不会被提交到 git</b>。</li>
+                    <li>API Key <b>不会回显</b>到页面上，接口只返回末 4 位用于核对；留空提交表示保持原值。</li>
+                    <li>Key 以明文存于本机文件，请勿把该文件分享或上传到任何公开位置。</li>
+                    <li>本工具所有请求都由你的浏览器经本机 Flask 服务转发到你填写的接口，不经过任何第三方中转。</li>
+                </ul>
             </div>
         </div>
 
