@@ -23,6 +23,7 @@
         <button class="tab-btn active" data-tab="dashboard">📊 数据仪表盘</button>
         <button class="tab-btn" data-tab="history">📋 开奖记录</button>
         <button class="tab-btn" data-tab="recommend">🎲 智能选号</button>
+        <button class="tab-btn" data-tab="backtest">📈 策略回测</button>
         <button class="tab-btn" data-tab="decoder">🖼️ 图猜码</button>
     </nav>
 
@@ -138,6 +139,78 @@
                     <button class="generate-btn" onclick="generateNumbers()">
                         ✨ 生成号码
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Tab: 策略回测 ===== -->
+        <div class="tab-panel" id="panel-backtest">
+            <div class="card">
+                <div class="card-title"><span class="icon">📈</span> 历史命中率回测</div>
+                <div class="backtest-desc">
+                    对每种选号策略做<b>无未来数据泄露</b>的回测：预测第 N 期时，只使用第 N 期之前的历史数据。
+                    用于验证「热号 / 冷号 / 遗漏值」是否真的比随机更有优势。
+                </div>
+
+                <div class="backtest-controls">
+                    <label>回测期数
+                        <select id="btPeriods">
+                            <option value="100">100 期</option>
+                            <option value="200" selected>200 期</option>
+                            <option value="500">500 期</option>
+                            <option value="0">全部</option>
+                        </select>
+                    </label>
+                    <label>历史预热
+                        <select id="btMinHistory">
+                            <option value="20">20 期</option>
+                            <option value="30" selected>30 期</option>
+                            <option value="50">50 期</option>
+                        </select>
+                    </label>
+                    <label>冷热窗口
+                        <select id="btRecentN">
+                            <option value="20">20 期</option>
+                            <option value="30" selected>30 期</option>
+                            <option value="50">50 期</option>
+                        </select>
+                    </label>
+                    <label>随机种子
+                        <input type="number" id="btSeed" value="42" min="0" step="1" />
+                    </label>
+                    <button class="generate-btn" id="btRunBtn" onclick="runBacktest()">
+                        🚀 开始回测
+                    </button>
+                </div>
+
+                <div id="backtestStatus"></div>
+                <div id="backtestContent" style="display:none;">
+                    <div class="stat-cards" id="btStatCards"></div>
+
+                    <div class="verdict-box" id="btVerdict"></div>
+
+                    <div class="grid-2">
+                        <div class="card">
+                            <div class="card-title"><span class="icon">🎯</span> 平均正码命中数（对比随机基准）</div>
+                            <div class="chart-container" id="chartBtMainHits"></div>
+                        </div>
+                        <div class="card">
+                            <div class="card-title"><span class="icon">✨</span> 特码命中率</div>
+                            <div class="chart-container" id="chartBtSpecial"></div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title"><span class="icon">📊</span> 各策略命中个数分布</div>
+                        <div class="chart-container" id="chartBtDistribution"></div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-title"><span class="icon">📋</span> 回测明细</div>
+                        <div style="overflow-x:auto;">
+                            <table class="history-table" id="btTable"></table>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

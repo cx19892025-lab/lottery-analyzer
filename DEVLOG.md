@@ -55,6 +55,7 @@
 | 数据层 | `database.py` | SQLite 建表、CRUD、模拟数据生成 | `get_all_results()`, `insert_result()` |
 | 分析引擎 | `analyzer.py` | 频率、冷热号、遗漏值、奇偶比等统计 | `get_dashboard_data()`, `smart_recommend()` |
 | 解码引擎 | `decoder.py` | 生肖/五行/色波/方位映射 + 多维交叉推导 | `decode_elements()`, `quick_decode()` |
+| 回测引擎 | `backtest.py` | 策略历史命中率回测（无未来数据泄露） | `run_backtest()` |
 | 视觉识别 | `vision.py` | 图片→AI分析→元素提取→映射转换 | `analyze_image()`, `map_vision_to_decoder_selections()` |
 | 路由网关 | `app.py` | Flask 路由 + 模块调度 | 所有 `/api/*` 路由 |
 
@@ -159,11 +160,60 @@ decoder.decode_elements(selections)
 
 ---
 
+### V1.2 — 历史命中率回测 (2026-11-02 20:55)
+- **负责智能体**：DeepSeek
+- **工作分支**：feature/deepseek/hit-rate-backtest
+- **修改目标**：
+  1. 实现四种选号策略的**无未来数据泄露**历史回测，回答"热号/冷号/遗漏值是否真的比随机强"
+  2. 修复 `smart_recommend()` 的回测可用性缺陷（原先只读全库，回测必然泄露未来数据）
+  3. 顺带修复 `analyzer.py` 中 numpy 标量泄漏导致的 JSON 序列化隐患，并做性能优化
+- **核心改动文件**：
+  - `backtest.py`（新增，281 行）：回测引擎
+    - `run_backtest(strategies, min_history, max_periods, recent_n, seed)` 主入口
+    - 对第 i 期预测时传 `limit=i`，**只用前 i 期历史**，绝不触碰当期及未来
+    - `_evaluate()` 命中判定：正码命中数 / 特码命中 / 任意命中数（7 个号码内）
+    - `_random_baseline()` 超几何理论基准：正码 6×6/49≈0.735，特码 1/49≈2.04%
+    - `_build_verdict()` 生成诚实结论，不吹嘘策略有效性
+  - `analyzer.py`：
+    - `smart_recommend()` 新增 `limit` / `recent_n` 参数（**回测必需**）
+    - `missing_values()` 新增 `limit` 参数；改用 numpy 向量化（22s → 5s，快 4.4 倍）
+    - `hot_cold_numbers()` 同频次按号码升序排序，保证回测可复现
+    - `odd_even_analysis()` / `big_small_analysis()` 分布改为按 key 排序，消除字典顺序抖动
+    - 修复 `_extract_all_numbers()` / `missing_values()` / `sum_analysis()` 的 `numpy.int64`/`float64` 泄漏
+  - `app.py`：新增 `GET /api/backtest`（支持 strategies / min_history / max_periods / recent_n / seed 参数，非法策略返回 400）
+  - `templates/index.html`：新增「📈 策略回测」Tab（参数控件 + 结论框 + 3 图表 + 明细表）
+  - `static/js/main.js`：新增回测渲染逻辑（4 个渲染函数 + 柱状图随机基准 markLine）
+  - `static/css/style.css`：新增 `.backtest-*` / `.verdict-*` 样式
+- **自测验证结果**：
+  - **可复现性**：同一 seed 跨进程两次运行结果完全一致 ✅
+  - **无未来泄露**：`frequency_analysis(k)` / `missing_values(k)` 与"仅取最近 k 期手工统计"逐值一致；打桩验证 `limit=k` 的推荐 == 仅用最近 k 期数据的推荐 ✅
+  - **命中核对**：手工复算某一期的正码/特码命中数，与引擎输出一致 ✅
+  - **统计自洽**：命中个数分布求和 == 回测期数 ✅
+  - **优化等价性**：向量化前后 `get_dashboard_data()` 输出 **逐字节相同** ✅
+  - **边界**：`min_history` 超过总期数时返回明确 error ✅
+  - **回归**：19 个既有 API 端点全部 HTTP 200，仪表盘数值正常 ✅
+  - **前端**：Playwright 实测 — 1600/1024/390 三种宽度均无横向溢出，3 个图表正常渲染，参数重跑与 Tab 切换无控制台报错 ✅
+  - **性能**：200 期全策略回测 22.7s → **5.3s**
+- **关键发现（重要）**：
+  - 单次回测（seed=42，270 期）会显示"热号优先 0.8 vs 基准 0.735"，看似有优势；
+    但**跑 10 个不同 seed 后，四种策略均值全部收敛到基准**：
+    `balanced 0.735 / hot 0.738 / cold 0.722 / random 0.725`（z 值均 < 0.5）
+  - 结论：所谓"热号/冷号/遗漏值"在统计上**与随机无显著差异**，这符合六合彩独立随机的本质。
+    前端结论框已如实说明，避免误导用户。**请勿在后续迭代中把这种噪声包装成"预测能力"。**
+- **遗留注意事项 / 给下一位 Agent 的说明**：
+  1. `smart_recommend(strategy, limit=...)` 的 `limit` 语义是**"取最近 N 期"**（因为 `get_all_results(limit)` 是 `ORDER BY period DESC LIMIT n`）。回测里传 `limit=i` 表示"第 i 期之前的 i 期"，务必不要改成升序取前 i 期，否则会泄露未来数据。
+  2. 回测随机性通过 `random.seed()` + `getstate/setstate` 控制，使各策略消耗同一段随机序列、保证横向可比。改动 `smart_recommend` 的随机调用顺序会影响回测数值。
+  3. 回测耗时随期数线性增长（每期每策略一次全量分析）。默认 `max_periods=200` 以控制响应时间；若后续要跑全量 300 期，建议加缓存或改用增量统计。
+  4. `analyzer.py` 用 pandas/numpy 计算后**必须显式 `int()` / `float()` 转换**，否则 numpy 标量会导致 Flask `jsonify` 抛 `TypeError: Object of type int64 is not JSON serializable`（本次已踩坑）。
+  5. 数据源仍是 300 期模拟数据。接入真实数据后，回测结论可能变化，但"独立随机"的预期不变。
+
+---
+
 ## 四、待开发 (Backlog)
 
 ### P2 — 下一批迭代
 - [ ] **真实历史数据爬虫**：对接开奖数据源，替换模拟数据
-- [ ] **历史命中率回测**：各策略的历史"命中"表现统计
+- [x] **历史命中率回测**：各策略的历史"命中"表现统计（V1.2 完成）
 - [ ] **AI 生成每日玄机图**：用 AI 生图模型每天生成一张趣味玄机图
 - [ ] **移动端适配**：响应式布局优化
 
@@ -202,6 +252,7 @@ python app.py
 app.py ──→ database.py   (数据读写)
        ──→ analyzer.py   (统计分析，依赖 database)
        ──→ decoder.py    (解码推导，独立)
+       ──→ backtest.py   (回测，依赖 analyzer + database)
        ──→ vision.py     (AI 视觉，依赖 decoder + kaggle_llm 外部)
 ```
 
