@@ -74,13 +74,13 @@ lottery-analyzer/
 
 ## 协作指南
 
-本项目使用 Git 管理。其他 Agent 协作时请遵循：
+本项目使用 Git 管理，并引入了严密的**多智能体协作守则**。其他 Agent 协作时请遵守：
 
-1. **查看 `DEVLOG.md`** 了解设计思路与当前状态
-2. **新功能请开分支**：`git checkout -b feature/xxx`
-3. **保持模块边界**：analyzer / decoder / vision 各司其职
-4. **API 兼容性**：新增接口不破坏现有前端调用
-5. **提交信息规范**：`feat:` / `fix:` / `refactor:` / `docs:` 前缀
+1. **阅读准则**：开发前**必须**通读 [`AGENT_COLLABORATION_RULES.md`](./AGENT_COLLABORATION_RULES.md) 和 [`DEVLOG.md`](./DEVLOG.md)
+2. **分支管理**：新特性开发必须开辟分支 `feature/<agent_name>/<task>`，禁止直接污染 `main`
+3. **改动留痕**：完成编码后必须在 `DEVLOG.md` 按照标准模板登记改动说明
+4. **提交规范**：严格遵循 Conventional Commits（`feat:`, `fix:`, `docs:`, 等）
+5. **分支清理**：合并回 `main` 后立即清理临时分支，保持分支树整洁
 
 ## License
 
