@@ -44,7 +44,7 @@
 ├────────────┬──────────┬───────────┬────────────────┤
 │ database.py│analyzer.py│decoder.py │  vision.py     │
 │ SQLite CRUD│ 统计分析  │ 符号映射  │ AI 视觉识别    │
-│ 数据生成   │ 10项指标  │ 交叉推导  │ Kaggle Gemini  │
+│ 数据生成   │ 10项指标  │ 交叉推导  │ 接口用户自配置  │
 └────────────┴──────────┴───────────┴────────────────┘
 ```
 
@@ -56,7 +56,8 @@
 | 分析引擎 | `analyzer.py` | 频率、冷热号、遗漏值、奇偶比等统计 | `get_dashboard_data()`, `smart_recommend()` |
 | 解码引擎 | `decoder.py` | 生肖/五行/色波/方位映射 + 多维交叉推导 | `decode_elements()`, `quick_decode()` |
 | 回测引擎 | `backtest.py` | 策略历史命中率回测（无未来数据泄露） | `run_backtest()` |
-| 视觉识别 | `vision.py` | 图片→AI分析→元素提取→映射转换 | `analyze_image()`, `map_vision_to_decoder_selections()` |
+| 配置管理 | `settings.py` | AI 接口配置读写 + Key 脱敏 | `load_settings()`, `public_settings()` |
+| 视觉识别 | `vision.py` | 图片→AI分析→元素提取→映射转换（接口可自配） | `analyze_image()`, `map_vision_to_decoder_selections()` |
 | 路由网关 | `app.py` | Flask 路由 + 模块调度 | 所有 `/api/*` 路由 |
 
 ### 关键设计决策
@@ -252,6 +253,67 @@ decoder.decode_elements(selections)
 
 ---
 
+### V1.3 — AI 接口改为用户自配置，彻底移除 Kaggle 依赖 (2026-11-02 23:20)
+- **负责智能体**：DeepSeek
+- **工作分支**：feature/deepseek/configurable-ai-settings
+- **触发问题**（用户提问"现在有用到 AI 吗"→ 排查发现 AI 功能实际是坏的）：
+  1. `vision.py` 写死 `resolve_model("gemini-3.7")` → `google/gemini-3.7-flash`，
+     而该模型在 Kaggle 代理上**不存在**，实测返回 `404 The requested model was not found`。
+     即：图猜码的 AI 识图**一直是失效的**，只是失败被 try/except 吞掉、只在前端显示一句含糊报错。
+  2. 逐个探测 Kaggle 别名表发现：`gemini-3.7`、`gemini-3.5` 均已 404，
+     实际可用的只有 `google/gemini-3-flash-preview` 与 `google/gemini-3.1-flash-lite-preview`。
+  3. 用户明确要求："那个 API 删除吧，要翻墙才能用不实在"。
+- **修改目标**：
+  1. 删除对 Kaggle 模型代理与本机外部脚本的全部依赖
+  2. 新增「⚙️ 设置」页，让用户自己填写 Base URL / API Key / 模型名
+  3. 未配置时优雅降级：图猜码禁用上传并引导去设置，**手动选元素解码照常可用**
+- **核心改动文件**：
+  - `settings.py`（新增，150 行）：AI 配置读写
+    - 配置存 `data/settings.json`，**已加入 .gitignore**
+    - `mask_key()` 脱敏，`public_settings()` 保证接口永不返回明文 Key
+    - `save_settings()` 中 `api_key` 留空 = 保持原值（前端不回显，避免误清空）
+    - 内置 7 个服务商预设（DeepSeek / 阿里百炼 / 智谱 / Moonshot / 硅基流动 / OpenAI / 本地 Ollama）
+  - `vision.py`：
+    - **删除** `sys.path.insert(r"c:\Users\10397\antigravity\kind-hubble")` 与 `kaggle_llm` 导入
+    - **删除** `HAS_KAGGLE` 标志，改为 `_get_client()` 按用户配置构造 OpenAI 兼容客户端
+    - 新增 `_friendly_error()`，把 401/403/404/429/超时/连不上翻译成中文可操作提示
+  - `app.py`：
+    - 新增 `GET/POST /api/settings`、`POST /api/settings/test`
+    - `/api/decoder/vision` 未配置时返回 503 + 明确指引；AI 失败返回 502 + 可读原因
+    - `/api/vision/status` 改为返回配置状态（不再依赖 HAS_KAGGLE）
+  - `templates/index.html`：新增「⚙️ 设置」Tab（预设卡片 + 表单 + 测试按钮 + 安全说明）；
+    图猜码页新增未配置警告条
+  - `static/js/main.js`：设置页逻辑 + `refreshAiStatus()` 驱动图猜码降级
+  - `static/css/style.css`：设置页样式
+  - `requirements.txt`：补 `openai>=1.0`（原先靠外部脚本隐式带入，属于隐藏依赖）
+- **自测验证结果**：
+  - **安全（重点）**：保存含 Key 的配置后，POST/GET 响应体中**均不含明文 Key**；
+    GET 返回字段确认无 `api_key`，只有 `api_key_masked`；`git check-ignore` 确认
+    `data/settings.json` 被忽略，`git add -A` 后**未进入暂存区** ✅
+  - **留空保持**：`api_key: ""` 提交后 Key 保留（末 4 位不变），base_url/model 正常更新 ✅
+  - **持久化**：磁盘文件字段正确，`timeout` 以 int 落盘 ✅
+  - **健壮性**：`timeout:"abc"`、`max_tokens:null`、未知字段、空 body 均不崩溃且不写坏配置 ✅
+  - **错误可读**：假地址 → "无法连接接口地址"；错误模型名 → 404 提示；真实调用智谱 → 返回其原始中文报错"令牌已过期或验证不正确" ✅
+  - **端到端（本地 mock OpenAI 服务）**：配置 → 测试连接 → 上传图片 → AI 识别 → 元素映射 → 出号，
+    全链路打通；UI 实测上传后自动识别并输出「2 7 8 12 24 36 + 30」，控制台零报错 ✅
+  - **降级**：未配置时警告条显示、上传区禁用且点击被拦下并引导，手动解码仍正常出号 ✅
+  - **布局**：1500/1024/390 三种宽度无横向溢出，7 张预设卡无重叠，输入框均可用 ✅
+  - **回归**：9 个既有端点全部 200 ✅
+  - **残留检查**：全项目已无 `kaggle` / `HAS_KAGGLE` / `kind-hubble` 引用 ✅
+- **遗留注意事项 / 给下一位 Agent 的说明**：
+  1. **模型必须支持图片输入**。用户若填纯文本模型（如 `deepseek-chat`），接口能连通但识图会失败——
+     预设里给 DeepSeek 填的是 `deepseek-chat` 仅作占位，实际识图建议用 `qwen-vl-max`、`glm-4v-flash`
+     等视觉模型。这是当前最容易让用户困惑的点。
+  2. `data/settings.json` **含明文 Key**。已在 .gitignore 中，但若将来加导出/备份功能，
+     务必排除该文件；也不要把它打进任何发布包。
+  3. `_friendly_error()` 目前按关键字匹配报错文本，各家服务商措辞不同，可能漏判；
+     兜底会返回原始报错（截断 300 字符），不会吞掉信息。
+  4. `POST /api/settings/test` 会发一条真实的 1x1 图片请求来验证**多模态**能力，
+     因此会产生极小额度消耗；这是有意设计——只测文本无法确认能否识图。
+  5. 本地 Ollama 无需 Key，`_get_client()` 在 Key 为空时传 `"not-needed"` 占位。
+
+---
+
 ## 四、待开发 (Backlog)
 
 ### P2 — 下一批迭代
@@ -273,7 +335,7 @@ decoder.decode_elements(selections)
 ### 环境准备
 ```bash
 pip install flask pandas numpy   # 核心依赖
-pip install openai python-dotenv  # AI 视觉（可选）
+pip install openai               # AI 识图（可选，需自备接口）
 ```
 
 ### 本地运行
@@ -296,10 +358,13 @@ app.py ──→ database.py   (数据读写)
        ──→ analyzer.py   (统计分析，依赖 database)
        ──→ decoder.py    (解码推导，独立)
        ──→ backtest.py   (回测，依赖 analyzer + database)
-       ──→ vision.py     (AI 视觉，依赖 decoder + kaggle_llm 外部)
+       ──→ vision.py     (AI 视觉，依赖 decoder + settings)
+       ──→ settings.py   (AI 配置读写，独立)
 ```
 
-### AI 视觉模块注意事项
-- `vision.py` 依赖用户本机的 `c:\Users\10397\antigravity\kind-hubble\kaggle_llm.py`
-- 如果部署到其他机器，需要配置 Kaggle 模型代理的认证
-- `HAS_KAGGLE` 标志会在模块加载时自动检测，不可用时 graceful 降级
+### AI 视觉模块注意事项（V1.3 起）
+- **不再依赖任何外部脚本或第三方内置密钥**。接口地址 / API Key / 模型名全部由用户在「⚙️ 设置」页填写。
+- 配置存放于 `data/settings.json`（含明文 Key，已 gitignore）。**不要提交、不要打包、不要分享该文件。**
+- 必须使用**支持图片输入**的模型，纯文本模型无法识图。
+- 未配置时：图猜码禁用上传并引导去设置，**手动选元素解码不受影响**。
+- 排错顺序：设置页「🔌 测试连接」→ 看返回的中文提示（已覆盖 401/403/404/429/超时/连不上）。

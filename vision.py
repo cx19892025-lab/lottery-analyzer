@@ -1,21 +1,18 @@
 """
 六合彩数据分析工具 - AI 视觉识别模块
-使用 Kaggle 免费模型 (Gemini 3.7 Flash) 识别图片中的元素
+
+通过任意 OpenAI 兼容接口识别图片中的元素。
+接口地址 / API Key / 模型名全部由用户在「设置」页自行填写，
+不再依赖本机任何外部脚本，也不再写死模型名。
+
+未配置时 analyze_image() 返回结构化错误，由前端提示用户去设置页填写。
 """
 import base64
 import json
-import sys
 import os
 import re
 
-# 添加 kaggle_llm 路径
-sys.path.insert(0, r"c:\Users\10397\antigravity\kind-hubble")
-
-try:
-    from kaggle_llm import get_client, resolve_model
-    HAS_KAGGLE = True
-except ImportError:
-    HAS_KAGGLE = False
+import settings as settings_mod
 
 
 # 视觉识别提示词
@@ -45,27 +42,54 @@ VISION_SYSTEM_PROMPT = """你是一位六合彩玄机图解码专家。用户会
 VISION_USER_PROMPT = "请仔细分析这张玄机图，识别其中所有可能与六合彩选号相关的元素。"
 
 
+def _get_client():
+    """
+    按用户配置创建 OpenAI 兼容客户端。
+    返回 (client, model)；未配置或缺少依赖时抛 RuntimeError。
+    """
+    cfg = settings_mod.get_ai_config()
+
+    if not cfg["base_url"] or not cfg["model"]:
+        raise RuntimeError("尚未配置 AI 接口，请到「设置」页填写接口地址与模型名")
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise RuntimeError("缺少 openai 依赖，请执行：pip install openai")
+
+    client = OpenAI(
+        api_key=cfg["api_key"] or "not-needed",  # 本地 Ollama 等无需 Key
+        base_url=cfg["base_url"].rstrip("/"),
+        timeout=cfg.get("timeout", 60),
+    )
+    return client, cfg["model"]
+
+
 def analyze_image(image_data_b64: str, mime_type: str = "image/png") -> dict:
     """
-    使用 AI 视觉模型分析图片中的元素
+    使用用户配置的 AI 视觉模型分析图片中的元素
 
     参数:
         image_data_b64: Base64 编码的图片数据
         mime_type: 图片 MIME 类型
 
     返回:
-        识别到的元素字典
+        识别到的元素字典；失败时含 "error" 字段
     """
-    if not HAS_KAGGLE:
-        return {"error": "Kaggle AI 模型未配置", "animals": [], "colors": [],
-                "elements": [], "directions": [], "numbers": [], "objects": [],
-                "description": "AI 模型不可用"}
+    empty = {
+        "animals": [], "colors": [], "elements": [],
+        "directions": [], "numbers": [], "objects": [],
+    }
 
     try:
-        client, _ = get_client()
-        # 使用 Gemini 3.7 Flash（支持视觉，免费）
-        target_model = resolve_model("gemini-3.7")
+        client, model = _get_client()
+    except RuntimeError as e:
+        return {**empty, "error": str(e), "description": "AI 未配置"}
 
+    cfg = settings_mod.get_ai_config()
+    max_tokens = cfg.get("max_tokens", 1024)
+
+    try:
         messages = [
             {"role": "system", "content": VISION_SYSTEM_PROMPT},
             {"role": "user", "content": [
@@ -83,25 +107,38 @@ def analyze_image(image_data_b64: str, mime_type: str = "image/png") -> dict:
         ]
 
         response = client.chat.completions.create(
-            model=target_model,
+            model=model,
             messages=messages,
-            max_tokens=1024
+            max_tokens=max_tokens,
         )
 
         raw_content = response.choices[0].message.content or ""
-
-        # 尝试解析 JSON
-        result = _parse_json_response(raw_content)
-        return result
+        return _parse_json_response(raw_content)
 
     except Exception as e:
         return {
-            "error": str(e),
-            "animals": [], "colors": [],
-            "elements": [], "directions": [],
-            "numbers": [], "objects": [],
-            "description": f"AI 分析失败: {str(e)}"
+            **empty,
+            "error": _friendly_error(e),
+            "description": f"AI 分析失败: {_friendly_error(e)}",
         }
+
+
+def _friendly_error(e) -> str:
+    """把常见报错翻译成用户能看懂的话"""
+    msg = str(e)
+    if "not found" in msg and "model" in msg.lower():
+        return f"模型不存在，请检查「设置」页的模型名是否正确（原始报错：{msg[:160]}）"
+    if "401" in msg or "Unauthorized" in msg or "invalid_api_key" in msg.lower():
+        return f"API Key 无效或已过期，请到「设置」页重新填写（原始报错：{msg[:160]}）"
+    if "403" in msg:
+        return f"该 Key 无权访问此模型，请确认账号权限（原始报错：{msg[:160]}）"
+    if "429" in msg:
+        return f"请求过于频繁或额度用尽，请稍后再试（原始报错：{msg[:160]}）"
+    if "timed out" in msg.lower() or "timeout" in msg.lower():
+        return f"请求超时，可在「设置」页调大超时时间（原始报错：{msg[:160]}）"
+    if "Connection" in msg or "getaddrinfo" in msg or "SSL" in msg:
+        return f"无法连接接口地址，请检查网络与 Base URL（原始报错：{msg[:160]}）"
+    return msg[:300]
 
 
 def _parse_json_response(raw_text: str) -> dict:
@@ -219,7 +256,15 @@ def map_vision_to_decoder_selections(vision_result: dict) -> dict:
 
 
 if __name__ == "__main__":
-    # 测试：检查模块是否可用
-    print(f"Kaggle AI available: {HAS_KAGGLE}")
-    if HAS_KAGGLE:
-        print("Vision module ready!")
+    import sys
+    import io
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+    cfg = settings_mod.get_ai_config()
+    print("AI 配置状态:", "已配置" if settings_mod.is_configured() else "未配置")
+    print("  Base URL:", cfg["base_url"] or "(空)")
+    print("  模型名  :", cfg["model"] or "(空)")
+    print("  API Key :", settings_mod.mask_key(cfg["api_key"]) or "(空)")
+    if not settings_mod.is_configured():
+        print("\n请启动应用后到「设置」页填写接口地址与模型名。")

@@ -13,7 +13,8 @@ from analyzer import (
 )
 from backtest import run_backtest, STRATEGIES, MIN_HISTORY
 from decoder import get_all_categories, decode_elements, quick_decode
-from vision import analyze_image, map_vision_to_decoder_selections, HAS_KAGGLE
+from vision import analyze_image, map_vision_to_decoder_selections
+import settings as settings_mod
 
 app = Flask(__name__)
 
@@ -167,8 +168,10 @@ def api_decoder_quick():
 @app.route("/api/decoder/vision", methods=["POST"])
 def api_decoder_vision():
     """AI 视觉识别解码 - 上传图片自动分析"""
-    if not HAS_KAGGLE:
-        return jsonify({"error": "AI 视觉模型未配置，请检查 Kaggle 环境"}), 503
+    if not settings_mod.is_configured():
+        return jsonify({
+            "error": "尚未配置 AI 接口，请先到「设置」页填写接口地址与模型名"
+        }), 503
 
     data = request.get_json()
     image_b64 = data.get("image", "")
@@ -183,6 +186,10 @@ def api_decoder_vision():
 
     # 1. AI 识别图片元素
     vision_result = analyze_image(image_b64, mime_type)
+
+    # AI 调用失败时直接回传原因，前端展示可读提示
+    if vision_result.get("error"):
+        return jsonify({"error": vision_result["error"], "vision": vision_result}), 502
 
     # 2. 映射为解码器格式
     selections = map_vision_to_decoder_selections(vision_result)
@@ -200,7 +207,90 @@ def api_decoder_vision():
 @app.route("/api/vision/status")
 def api_vision_status():
     """检查 AI 视觉功能是否可用"""
-    return jsonify({"available": HAS_KAGGLE})
+    s = settings_mod.load_settings()
+    return jsonify({
+        "available": settings_mod.is_configured(s),
+        "base_url": s["base_url"],
+        "model": s["model"],
+        "has_api_key": bool(s["api_key"]),
+    })
+
+
+# ==================== 设置 API ====================
+
+@app.route("/api/settings", methods=["GET"])
+def api_settings_get():
+    """读取 AI 配置（API Key 一律脱敏返回）"""
+    return jsonify(settings_mod.public_settings())
+
+
+@app.route("/api/settings", methods=["POST"])
+def api_settings_post():
+    """
+    保存 AI 配置
+    api_key 留空表示保持原值不变（前端不回显 Key，避免误清空）
+    """
+    data = request.get_json(silent=True) or {}
+    settings_mod.save_settings(data)
+    return jsonify({"ok": True, "settings": settings_mod.public_settings()})
+
+
+@app.route("/api/settings/test", methods=["POST"])
+def api_settings_test():
+    """
+    测试 AI 连接：发一条极短的多模态请求验证地址 / Key / 模型名是否可用。
+    请求体可选传 base_url / api_key / model 做「未保存先测试」。
+    """
+    data = request.get_json(silent=True) or {}
+
+    # 允许用请求里的临时值覆盖已存配置（便于先测再存）
+    saved = settings_mod.load_settings()
+    trial = dict(saved)
+    for k in ("base_url", "model"):
+        if data.get(k):
+            trial[k] = str(data[k]).strip()
+    if data.get("api_key"):
+        trial["api_key"] = str(data["api_key"]).strip()
+
+    if not trial["base_url"] or not trial["model"]:
+        return jsonify({"ok": False, "error": "请先填写接口地址与模型名"}), 400
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return jsonify({"ok": False, "error": "缺少 openai 依赖，请执行：pip install openai"}), 500
+
+    # 1x1 透明 PNG，用来验证接口是否真的支持图片输入
+    tiny_png = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42m"
+                "P8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=")
+
+    try:
+        client = OpenAI(
+            api_key=trial["api_key"] or "not-needed",
+            base_url=trial["base_url"].rstrip("/"),
+            timeout=trial.get("timeout", 60),
+        )
+        resp = client.chat.completions.create(
+            model=trial["model"],
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url",
+                     "image_url": {"url": f"data:image/png;base64,{tiny_png}"}},
+                    {"type": "text", "text": "回复两个字：可用"},
+                ],
+            }],
+            max_tokens=16,
+        )
+        reply = (resp.choices[0].message.content or "").strip()
+        return jsonify({
+            "ok": True,
+            "message": f"连接成功，模型已响应：{reply[:40]}",
+            "model": trial["model"],
+        })
+    except Exception as e:
+        from vision import _friendly_error
+        return jsonify({"ok": False, "error": _friendly_error(e)}), 502
 
 
 # ==================== 启动 ====================
