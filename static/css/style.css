@@ -1,0 +1,574 @@
+/* ==================== 六合彩数据分析工具 - 全局样式 ==================== */
+
+:root {
+    --bg-primary: #0f0f1a;
+    --bg-secondary: #1a1a2e;
+    --bg-card: #16213e;
+    --bg-card-hover: #1a2744;
+    --accent: #e94560;
+    --accent-2: #0ea5e9;
+    --accent-3: #10b981;
+    --gold: #f59e0b;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --border: #334155;
+    --red-ball: #ef4444;
+    --blue-ball: #3b82f6;
+    --green-ball: #22c55e;
+    --radius: 12px;
+    --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+}
+
+/* ==================== 顶部导航 ==================== */
+
+.header {
+    background: linear-gradient(135deg, var(--bg-secondary), var(--bg-card));
+    border-bottom: 1px solid var(--border);
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(10px);
+}
+
+.header h1 {
+    font-size: 24px;
+    background: linear-gradient(135deg, var(--accent), var(--gold));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.header .subtitle {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+/* ==================== 标签页导航 ==================== */
+
+.tab-nav {
+    display: flex;
+    gap: 4px;
+    padding: 12px 32px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+}
+
+.tab-btn {
+    padding: 10px 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.3s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tab-btn:hover {
+    background: var(--bg-card);
+    color: var(--text-primary);
+}
+
+.tab-btn.active {
+    background: var(--accent);
+    color: white;
+}
+
+/* ==================== 内容区域 ==================== */
+
+.main-content {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px 32px;
+}
+
+.tab-panel {
+    display: none;
+}
+
+.tab-panel.active {
+    display: block;
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ==================== 卡片 ==================== */
+
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+    transition: transform 0.2s, border-color 0.2s;
+}
+
+.card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+}
+
+.card-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-primary);
+}
+
+.card-title .icon {
+    font-size: 20px;
+}
+
+/* ==================== 网格布局 ==================== */
+
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+}
+
+.grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+}
+
+/* ==================== 统计卡片 ==================== */
+
+.stat-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.stat-card {
+    background: linear-gradient(135deg, var(--bg-card), var(--bg-card-hover));
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    text-align: center;
+}
+
+.stat-card .value {
+    font-size: 32px;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.stat-card .label {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+/* ==================== 图表容器 ==================== */
+
+.chart-container {
+    width: 100%;
+    height: 400px;
+}
+
+.chart-container-sm {
+    width: 100%;
+    height: 300px;
+}
+
+/* ==================== 号码球 ==================== */
+
+.ball {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 16px;
+    color: white;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.3), inset 0 -2px 4px rgba(0,0,0,0.2), inset 0 2px 4px rgba(255,255,255,0.15);
+    margin: 4px;
+    transition: transform 0.3s;
+}
+
+.ball:hover {
+    transform: scale(1.15);
+}
+
+.ball.red { background: linear-gradient(135deg, #ef4444, #dc2626); }
+.ball.blue { background: linear-gradient(135deg, #3b82f6, #2563eb); }
+.ball.green { background: linear-gradient(135deg, #22c55e, #16a34a); }
+.ball.special {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    width: 48px;
+    height: 48px;
+    font-size: 18px;
+    border: 3px solid #fbbf24;
+}
+.ball.plus {
+    background: transparent;
+    color: var(--gold);
+    font-size: 24px;
+    box-shadow: none;
+    width: 30px;
+}
+
+.balls-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+/* ==================== 历史记录表格 ==================== */
+
+.history-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.history-table th,
+.history-table td {
+    padding: 12px 16px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+}
+
+.history-table th {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.history-table tr:hover {
+    background: var(--bg-card-hover);
+}
+
+/* ==================== 智能选号 ==================== */
+
+.strategy-btns {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.strategy-btn {
+    padding: 12px 28px;
+    border: 2px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.strategy-btn:hover {
+    border-color: var(--accent);
+    background: var(--bg-card-hover);
+}
+
+.strategy-btn.active {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: white;
+}
+
+.result-display {
+    text-align: center;
+    padding: 40px;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+}
+
+.result-display .label {
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.result-display .reason {
+    color: var(--gold);
+    font-size: 14px;
+    background: rgba(245, 158, 11, 0.1);
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.generate-btn {
+    padding: 14px 48px;
+    background: linear-gradient(135deg, var(--accent), #c2185b);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+    box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4);
+}
+
+.generate-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(233, 69, 96, 0.6);
+}
+
+.generate-btn:active {
+    transform: translateY(0);
+}
+
+/* ==================== 图猜码 ==================== */
+
+.decoder-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+/* 图片上传拖拽区 */
+.upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    background: rgba(14, 165, 233, 0.03);
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+}
+
+.upload-zone:hover {
+    border-color: var(--accent-2);
+    background: rgba(14, 165, 233, 0.08);
+}
+
+.upload-zone.dragover {
+    border-color: var(--accent-2);
+    background: rgba(14, 165, 233, 0.15);
+    border-style: solid;
+}
+
+.upload-zone.has-image {
+    border-color: var(--accent-3);
+    border-style: solid;
+    padding: 12px;
+}
+
+.vision-tag {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 13px;
+    margin: 3px;
+    background: rgba(14, 165, 233, 0.15);
+    color: var(--accent-2);
+    border: 1px solid rgba(14, 165, 233, 0.3);
+}
+
+.vision-tag.animal { background: rgba(239, 68, 68, 0.15); color: #ef4444; border-color: rgba(239, 68, 68, 0.3); }
+.vision-tag.color-tag { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border-color: rgba(245, 158, 11, 0.3); }
+.vision-tag.element { background: rgba(16, 185, 129, 0.15); color: #10b981; border-color: rgba(16, 185, 129, 0.3); }
+.vision-tag.direction { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.3); }
+.vision-tag.object { background: rgba(236, 72, 153, 0.15); color: #ec4899; border-color: rgba(236, 72, 153, 0.3); }
+
+.decode-category {
+    margin-bottom: 20px;
+}
+
+.decode-category h3 {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.decode-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.decode-option {
+    padding: 8px 18px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s;
+}
+
+.decode-option:hover {
+    border-color: var(--accent-2);
+    background: rgba(14, 165, 233, 0.1);
+}
+
+.decode-option.selected {
+    border-color: var(--accent-2);
+    background: var(--accent-2);
+    color: white;
+}
+
+.decode-trace {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    font-size: 14px;
+    line-height: 2;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.decode-trace .trace-item {
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.keyword-input {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.keyword-input input {
+    flex: 1;
+    padding: 10px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    font-size: 14px;
+    outline: none;
+}
+
+.keyword-input input:focus {
+    border-color: var(--accent-2);
+}
+
+.keyword-input button {
+    padding: 10px 20px;
+    background: var(--accent-2);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s;
+}
+
+.keyword-input button:hover {
+    background: #0284c7;
+}
+
+/* ==================== 加载动画 ==================== */
+
+.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 60px;
+    color: var(--text-secondary);
+}
+
+.spinner {
+    width: 30px;
+    height: 30px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 12px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ==================== 免责声明 ==================== */
+
+.disclaimer {
+    text-align: center;
+    padding: 16px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    border-top: 1px solid var(--border);
+    margin-top: 40px;
+    opacity: 0.7;
+}
+
+/* ==================== 响应式 ==================== */
+
+@media (max-width: 1024px) {
+    .grid-2, .decoder-grid { grid-template-columns: 1fr; }
+    .grid-3 { grid-template-columns: 1fr 1fr; }
+    .grid-4 { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 640px) {
+    .header { padding: 12px 16px; }
+    .main-content { padding: 16px; }
+    .tab-nav { padding: 8px 16px; }
+    .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    .strategy-btns { flex-direction: column; }
+}
