@@ -235,62 +235,165 @@ def api_settings_post():
     return jsonify({"ok": True, "settings": settings_mod.public_settings()})
 
 
-@app.route("/api/settings/test", methods=["POST"])
-def api_settings_test():
-    """
-    测试 AI 连接：发一条极短的多模态请求验证地址 / Key / 模型名是否可用。
-    请求体可选传 base_url / api_key / model 做「未保存先测试」。
-    """
-    data = request.get_json(silent=True) or {}
-
-    # 允许用请求里的临时值覆盖已存配置（便于先测再存）
-    saved = settings_mod.load_settings()
-    trial = dict(saved)
+def _trial_config(data):
+    """把请求里的临时值合并到已存配置上，便于「未保存先测试」"""
+    trial = dict(settings_mod.load_settings())
     for k in ("base_url", "model"):
         if data.get(k):
             trial[k] = str(data[k]).strip()
     if data.get("api_key"):
         trial["api_key"] = str(data["api_key"]).strip()
+    return trial
+
+
+def _build_trial_client(trial):
+    """按试运行配置构造 OpenAI 兼容客户端"""
+    from openai import OpenAI
+    return OpenAI(
+        api_key=trial["api_key"] or "not-needed",
+        base_url=trial["base_url"].rstrip("/"),
+        timeout=trial.get("timeout", 60),
+    )
+
+# 1x1 透明 PNG，用来验证接口是否真的支持图片输入
+_TINY_PNG = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42m"
+             "P8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=")
+
+
+@app.route("/api/settings/models", methods=["POST"])
+def api_settings_models():
+    """
+    读取该接口上可用的模型列表。
+    很多中转站的模型名与官方并不一致，让用户手填很容易填错，
+    这里直接把 /v1/models 拉回来给他挑。
+    """
+    data = request.get_json(silent=True) or {}
+    trial = _trial_config(data)
+
+    if not trial["base_url"]:
+        return jsonify({"ok": False, "error": "请先填写接口地址"}), 400
+
+    try:
+        client = _build_trial_client(trial)
+        models = client.models.list()
+        ids = sorted({m.id for m in models if getattr(m, "id", None)})
+        return jsonify({"ok": True, "models": ids, "count": len(ids)})
+    except Exception as e:
+        from vision import _friendly_error
+        msg = _friendly_error(e)
+        # 有些中转站不实现 /models，这不算配置错误，提示换成手动填写即可
+        if "404" in str(e) or "not found" in str(e).lower():
+            msg = "该接口没有提供 /models 列表接口，请手动填写模型名。" + msg
+        return jsonify({"ok": False, "error": msg}), 502
+
+
+@app.route("/api/settings/test", methods=["POST"])
+def api_settings_test():
+    """
+    分阶段诊断 AI 连接，逐步定位问题出在哪一层：
+      ① 模型列表  —— 验证地址与 Key 是否有效（部分接口无此能力，跳过不算失败）
+      ② 文本对话  —— 验证模型名是否真实可用
+      ③ 图片对话  —— 验证该模型是否支持看图（图猜码的硬性前提）
+    只需返回整体结论，同时把每一阶段的结果带上，便于用户判断该改哪一项。
+    """
+    data = request.get_json(silent=True) or {}
+    trial = _trial_config(data)
 
     if not trial["base_url"] or not trial["model"]:
         return jsonify({"ok": False, "error": "请先填写接口地址与模型名"}), 400
 
     try:
-        from openai import OpenAI
+        from vision import _friendly_error
+        client = _build_trial_client(trial)
     except ImportError:
         return jsonify({"ok": False, "error": "缺少 openai 依赖，请执行：pip install openai"}), 500
 
-    # 1x1 透明 PNG，用来验证接口是否真的支持图片输入
-    tiny_png = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42m"
-                "P8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=")
+    stages = []
 
+    # ① 模型列表
     try:
-        client = OpenAI(
-            api_key=trial["api_key"] or "not-needed",
-            base_url=trial["base_url"].rstrip("/"),
-            timeout=trial.get("timeout", 60),
-        )
+        models = client.models.list()
+        ids = sorted({m.id for m in models if getattr(m, "id", None)})
+        hit = trial["model"] in ids
+        stages.append({
+            "name": "接口连通 / Key 校验",
+            "ok": True,
+            "detail": f"读取到 {len(ids)} 个模型" + ("，模型名在列表中 ✓" if hit else "，但未找到你填的模型名"),
+            "models": ids[:60],
+            "model_found": hit,
+        })
+    except Exception as e:
+        msg = str(e)
+        if "404" in msg or "not found" in msg.lower():
+            stages.append({"name": "接口连通 / Key 校验", "ok": None,
+                           "detail": "该接口不提供 /models，跳过此项（不代表配置有错）"})
+        else:
+            stages.append({"name": "接口连通 / Key 校验", "ok": False,
+                           "detail": _friendly_error(e)})
+
+    # ② 文本对话
+    text_ok = False
+    try:
         resp = client.chat.completions.create(
             model=trial["model"],
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:image/png;base64,{tiny_png}"}},
-                    {"type": "text", "text": "回复两个字：可用"},
-                ],
-            }],
+            messages=[{"role": "user", "content": "回复两个字：可用"}],
             max_tokens=16,
         )
         reply = (resp.choices[0].message.content or "").strip()
-        return jsonify({
-            "ok": True,
-            "message": f"连接成功，模型已响应：{reply[:40]}",
-            "model": trial["model"],
-        })
+        text_ok = True
+        stages.append({"name": "文本对话", "ok": True, "detail": f"模型已响应：{reply[:40]}"})
     except Exception as e:
-        from vision import _friendly_error
-        return jsonify({"ok": False, "error": _friendly_error(e)}), 502
+        stages.append({"name": "文本对话", "ok": False, "detail": _friendly_error(e)})
+
+    # ③ 图片对话（图猜码的前提）
+    if text_ok:
+        try:
+            resp = client.chat.completions.create(
+                model=trial["model"],
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url",
+                         "image_url": {"url": f"data:image/png;base64,{_TINY_PNG}"}},
+                        {"type": "text", "text": "回复两个字：可用"},
+                    ],
+                }],
+                max_tokens=16,
+            )
+            reply = (resp.choices[0].message.content or "").strip()
+            stages.append({"name": "图片对话（识图必需）", "ok": True,
+                           "detail": f"该模型支持看图，已响应：{reply[:40]}"})
+        except Exception as e:
+            m = str(e)
+            low_m = m.lower()
+            if ("does not support image" in low_m or "image" in low_m
+                    or "vision" in low_m or "multimodal" in low_m):
+                detail = ("该模型不支持图片输入，图猜码将无法识图。"
+                          "请换用支持视觉的模型（如 qwen-vl-max、glm-4v-flash）。")
+            else:
+                detail = "图片对话失败：" + _friendly_error(e)
+            stages.append({"name": "图片对话（识图必需）", "ok": False, "detail": detail})
+    else:
+        stages.append({"name": "图片对话（识图必需）", "ok": None,
+                       "detail": "文本对话未通过，跳过图片测试"})
+
+    all_ok = all(s["ok"] is not False for s in stages)
+    vision_ok = any(s["name"].startswith("图片对话") and s["ok"] is True for s in stages)
+
+    result = {
+        "ok": all_ok and vision_ok,
+        "stages": stages,
+        "model": trial["model"],
+    }
+    if result["ok"]:
+        result["message"] = "连接成功，且该模型支持看图，图猜码可以正常使用。"
+    elif all_ok and not vision_ok:
+        result["error"] = "接口与模型都正常，但该模型不支持图片输入，图猜码需要换成支持视觉的模型。"
+    else:
+        failed = [s for s in stages if s["ok"] is False]
+        result["error"] = failed[0]["detail"] if failed else "连接失败"
+
+    return jsonify(result), (200 if result["ok"] else 502)
 
 
 # ==================== 启动 ====================

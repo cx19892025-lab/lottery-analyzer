@@ -328,8 +328,12 @@
 
                     <div class="settings-field">
                         <label for="setModel">模型名</label>
-                        <input type="text" id="setModel" placeholder="deepseek-chat / glm-4v-flash / qwen-vl-max" autocomplete="off" />
+                        <div class="key-row">
+                            <input type="text" id="setModel" placeholder="deepseek-chat / glm-4v-flash / qwen-vl-max" autocomplete="off" />
+                            <button type="button" class="mini-btn" id="listModelsBtn" onclick="listModels()">📋 读取可用模型</button>
+                        </div>
                         <div class="settings-hint">必须选<b>支持图片输入</b>的模型，纯文本模型无法识别玄机图</div>
+                        <div id="modelListBox" class="model-list" style="display:none;"></div>
                     </div>
 
                     <div class="settings-field-row">
