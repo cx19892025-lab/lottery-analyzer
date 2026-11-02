@@ -629,6 +629,78 @@ body {
 
 .settings-safety b { color: var(--text-primary); }
 
+/* 分阶段测试结果 */
+.stage-list {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stage-row {
+    display: grid;
+    grid-template-columns: 22px 150px 1fr;
+    gap: 8px;
+    align-items: start;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    line-height: 1.6;
+}
+
+.stage-icon { font-size: 13px; }
+.stage-name { color: var(--text-primary); font-weight: 600; }
+.stage-detail { color: var(--text-secondary); word-break: break-word; }
+
+/* 模型列表 */
+.model-list {
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: var(--bg-card);
+}
+
+.model-list-head {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+}
+
+.model-list-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.model-chip {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11.5px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    word-break: break-all;
+}
+
+.model-chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.model-chip.active {
+    border-color: var(--accent);
+    background: rgba(233, 69, 96, 0.15);
+    color: var(--accent);
+}
+
 /* 未配置 AI 时的提示条 */
 .ai-warning {
     display: flex;

@@ -126,18 +126,35 @@ def analyze_image(image_data_b64: str, mime_type: str = "image/png") -> dict:
 def _friendly_error(e) -> str:
     """把常见报错翻译成用户能看懂的话"""
     msg = str(e)
-    if "not found" in msg and "model" in msg.lower():
-        return f"模型不存在，请检查「设置」页的模型名是否正确（原始报错：{msg[:160]}）"
-    if "401" in msg or "Unauthorized" in msg or "invalid_api_key" in msg.lower():
-        return f"API Key 无效或已过期，请到「设置」页重新填写（原始报错：{msg[:160]}）"
+    low = msg.lower()
+    tail = f"（原始报错：{msg[:200]}）"
+
+    # 中转站/服务商上游故障：常以 400 或 5xx 出现，报错体里带 upstream_unavailable
+    if ("upstream_unavailable" in low or "server_error" in low
+            or "服务暂时不可用" in msg or "upstream" in low):
+        return ("上游服务暂时不可用（服务商或中转站侧故障，不是你的配置写错了）。"
+                "可稍后重试、换一个模型，或换一家服务商。" + tail)
+
+    if ("does not exist" in low or "no such model" in low
+            or "model_not_found" in low
+            or ("not found" in low and "model" in low)):
+        return f"模型不存在，请检查「设置」页的模型名是否正确（可点「读取可用模型」查看）{tail}"
+    if "401" in msg or "unauthorized" in low or "invalid_api_key" in low:
+        return f"API Key 无效或已过期，请到「设置」页重新填写{tail}"
     if "403" in msg:
-        return f"该 Key 无权访问此模型，请确认账号权限（原始报错：{msg[:160]}）"
-    if "429" in msg:
-        return f"请求过于频繁或额度用尽，请稍后再试（原始报错：{msg[:160]}）"
-    if "timed out" in msg.lower() or "timeout" in msg.lower():
-        return f"请求超时，可在「设置」页调大超时时间（原始报错：{msg[:160]}）"
-    if "Connection" in msg or "getaddrinfo" in msg or "SSL" in msg:
-        return f"无法连接接口地址，请检查网络与 Base URL（原始报错：{msg[:160]}）"
+        return f"该 Key 无权访问此模型，请确认账号权限{tail}"
+    if "429" in msg or "rate limit" in low or "quota" in low:
+        return f"请求过于频繁或额度用尽，请稍后再试{tail}"
+    if "timed out" in low or "timeout" in low:
+        return f"请求超时，可在「设置」页调大超时时间{tail}"
+    if "connection" in low or "getaddrinfo" in low or "ssl" in low:
+        return f"无法连接接口地址，请检查网络与 Base URL{tail}"
+
+    # 400 通常是「接口不支持你发的这个请求」，最常见的两个原因是模型名不对或不支持图片
+    if "400" in msg:
+        return ("请求被拒绝（400）。常见原因：该模型名不被此接口支持，"
+                "或该模型不支持图片输入。可点「读取可用模型」核对模型名。" + tail)
+
     return msg[:300]
 
 

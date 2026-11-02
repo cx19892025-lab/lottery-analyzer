@@ -798,6 +798,7 @@ function renderBtTable() {
 
 // ==================== 设置页 ====================
 let settingsLoaded = false;
+let settingsDirty = false;   // 用户是否已手动改动过表单
 let aiStatus = { available: false };
 
 async function refreshAiStatus() {
@@ -849,9 +850,15 @@ function gotoSettings() {
     if (btn) btn.click();
 }
 
-async function loadSettings() {
+async function loadSettings(force) {
+    // 用户在表单里已经动过手时，不要用服务端值覆盖（否则切页/慢请求会把正在输入的内容抹掉）
+    if (settingsDirty && !force) return;
+
     const res = await fetch("/api/settings");
     const s = await res.json();
+
+    // 二次确认：请求期间若用户开始输入，同样放弃覆盖
+    if (settingsDirty && !force) return;
 
     document.getElementById("setBaseUrl").value = s.base_url || "";
     document.getElementById("setModel").value = s.model || "";
@@ -865,6 +872,7 @@ async function loadSettings() {
 
     renderPresets(s.presets || []);
     settingsLoaded = true;
+    settingsDirty = false;
 }
 
 function renderPresets(presets) {
@@ -887,11 +895,24 @@ function applyPreset(id) {
 
     document.getElementById("setBaseUrl").value = p.base_url;
     document.getElementById("setModel").value = p.model;
+    settingsDirty = true;
     document.querySelectorAll(".preset-card").forEach(el => {
         el.classList.toggle("active", el.dataset.preset === id);
     });
     showSettingsStatus("info", `已填入「${p.name}」的地址与模型名，请补上 API Key 后保存。`);
 }
+
+// 用户开始编辑就置脏，避免异步 loadSettings 把正在输入的内容冲掉
+function markSettingsDirty() {
+    settingsDirty = true;
+    const listBox = document.getElementById("modelListBox");
+    if (listBox) listBox.style.display = "none";
+}
+
+["setBaseUrl", "setApiKey", "setModel", "setTimeout", "setMaxTokens"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", markSettingsDirty);
+});
 
 function toggleKeyVisibility() {
     const input = document.getElementById("setApiKey");
@@ -902,7 +923,8 @@ function toggleKeyVisibility() {
 }
 
 function resetSettingsForm() {
-    loadSettings();
+    settingsDirty = false;
+    loadSettings(true);   // 强制用已保存的值覆盖
     showSettingsStatus("info", "已重新载入已保存的配置。");
 }
 
@@ -947,7 +969,8 @@ async function saveSettings() {
             return;
         }
         showSettingsStatus("ok", "设置已保存到 data/settings.json");
-        await loadSettings();
+        settingsDirty = false;
+        await loadSettings(true);   // 保存后以服务端为准刷新（会清空 Key 输入框）
         await refreshAiStatus();
     } catch (e) {
         showSettingsStatus("err", `保存失败：${e.message}`);
@@ -966,7 +989,7 @@ async function testSettings() {
     }
 
     btn.disabled = true;
-    showSettingsStatus("info", "正在测试连接，请稍候...");
+    showSettingsStatus("info", "正在分阶段测试连接，请稍候...");
     try {
         const res = await fetch("/api/settings/test", {
             method: "POST",
@@ -974,16 +997,86 @@ async function testSettings() {
             body: JSON.stringify(payload),
         });
         const data = await res.json();
-        if (data.ok) {
-            showSettingsStatus("ok", data.message || "连接成功");
-        } else {
-            showSettingsStatus("err", data.error || "连接失败");
-        }
+        renderTestStages(data);
     } catch (e) {
         showSettingsStatus("err", `测试失败：${e.message}`);
     } finally {
         btn.disabled = false;
     }
+}
+
+function renderTestStages(data) {
+    const stages = data.stages || [];
+    const color = data.ok ? "#22c55e" : "#ef4444";
+    const head = data.ok
+        ? `✅ ${data.message || "连接成功"}`
+        : `❌ ${data.error || "连接失败"}`;
+
+    const rows = stages.map(s => {
+        const icon = s.ok === true ? "✅" : (s.ok === false ? "❌" : "⚠️");
+        const c = s.ok === true ? "#22c55e" : (s.ok === false ? "#ef4444" : "#f59e0b");
+        return `<div class="stage-row">
+            <span class="stage-icon" style="color:${c};">${icon}</span>
+            <span class="stage-name">${s.name}</span>
+            <span class="stage-detail" style="color:${c};">${s.detail || ""}</span>
+        </div>`;
+    }).join("");
+
+    document.getElementById("settingsStatus").innerHTML = `
+        <div class="settings-status" style="border-color:${color}; color:${color};">${head}</div>
+        <div class="stage-list">${rows}</div>
+    `;
+}
+
+async function listModels() {
+    const btn = document.getElementById("listModelsBtn");
+    const box = document.getElementById("modelListBox");
+    const payload = collectSettingsForm();
+
+    if (!payload.base_url) {
+        showSettingsStatus("err", "请先填写接口地址。");
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "读取中...";
+    try {
+        const res = await fetch("/api/settings/models", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+
+        if (!data.ok) {
+            box.style.display = "none";
+            showSettingsStatus("err", data.error || "读取模型列表失败");
+            return;
+        }
+
+        const current = payload.model;
+        box.style.display = "block";
+        box.innerHTML = `
+            <div class="model-list-head">共 ${data.count} 个模型，点击填入：</div>
+            <div class="model-list-items">
+                ${data.models.map(m => `
+                    <span class="model-chip ${m === current ? "active" : ""}"
+                          onclick="pickModel(this, '${m.replace(/'/g, "\\'")}')">${m}</span>
+                `).join("")}
+            </div>`;
+        showSettingsStatus("ok", `已读取 ${data.count} 个模型，点选即可填入模型名。`);
+    } catch (e) {
+        showSettingsStatus("err", `读取失败：${e.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "📋 读取可用模型";
+    }
+}
+
+function pickModel(el, name) {
+    document.getElementById("setModel").value = name;
+    document.querySelectorAll(".model-chip").forEach(c => c.classList.remove("active"));
+    el.classList.add("active");
 }
 
 // ==================== 图猜码 ====================
