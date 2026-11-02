@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Database (runtime generated)
+data/*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Env
+.env
+.venv/
+venv/
+
+# ECharts local cache (large binary, CDN fallback ok)
+# static/js/echarts.min.js
