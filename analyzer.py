@@ -21,13 +21,13 @@ def _load_dataframe(limit=None):
 
 def _extract_all_numbers(df, include_special=True):
     """从 DataFrame 中提取所有出现的号码（平铺为一维列表）"""
-    nums = []
-    for _, row in df.iterrows():
-        for i in range(1, 7):
-            nums.append(row[f"num{i}"])
-        if include_special:
-            nums.append(row["special"])
-    return nums
+    if df.empty:
+        return []
+    cols = [f"num{i}" for i in range(1, 7)]
+    if include_special:
+        cols.append("special")
+    # astype(int) 避免 numpy.int64 泄漏到 JSON 响应
+    return df[cols].to_numpy().ravel().astype(int).tolist()
 
 
 def frequency_analysis(limit=None):
@@ -56,38 +56,38 @@ def hot_cold_numbers(recent_n=30, top_k=10):
     if not freq:
         return {"hot": [], "cold": []}
 
-    sorted_nums = sorted(freq.items(), key=lambda x: x[1], reverse=True)
+    # 次数相同的号码按号码本身升序，保证结果可复现（回测依赖确定性）
+    sorted_nums = sorted(freq.items(), key=lambda x: (-x[1], x[0]))
     return {
         "hot": sorted_nums[:top_k],
         "cold": sorted_nums[-top_k:]
     }
 
 
-def missing_values():
+def missing_values(limit=None):
     """
     遗漏值分析 - 每个号码已连续多少期未出现
+    limit: 只统计最近 limit 期（None = 全部）
     返回: {number: missing_count}
     """
-    df = _load_dataframe()
+    df = _load_dataframe(limit)
     if df.empty:
         return {}
 
     # 按期号升序
     df = df.sort_values("period", ascending=True)
-    result = {n: 0 for n in NUM_RANGE}
     total_periods = len(df)
 
+    # 向量化：一次性取出每期的 7 个号码，避免逐期 iterrows 的巨额开销
+    num_cols = [f"num{i}" for i in range(1, 7)] + ["special"]
+    matrix = df[num_cols].to_numpy()  # shape: (期数, 7)
+
+    result = {}
     for num in NUM_RANGE:
-        # 从最近一期往回找
-        found = False
-        for idx, (_, row) in enumerate(df.iloc[::-1].iterrows()):
-            drawn = [row[f"num{i}"] for i in range(1, 7)] + [row["special"]]
-            if num in drawn:
-                result[num] = idx
-                found = True
-                break
-        if not found:
-            result[num] = total_periods
+        # 从最近一期往回找第一个出现该号码的期，其距离即遗漏值
+        hits = np.where((matrix == num).any(axis=1))[0]
+        # int() 避免 numpy.int64 泄漏到 JSON 响应
+        result[num] = int(total_periods - 1 - hits[-1]) if len(hits) else int(total_periods)
 
     return result
 
@@ -117,7 +117,7 @@ def odd_even_analysis(limit=None):
     ratio_counter = Counter(r["ratio"] for r in ratios)
     return {
         "detail": ratios[:50],  # 只返回最近50期明细
-        "distribution": dict(ratio_counter.most_common())
+        "distribution": dict(sorted(ratio_counter.items()))
     }
 
 
@@ -144,7 +144,7 @@ def big_small_analysis(limit=None):
     ratio_counter = Counter(r["ratio"] for r in ratios)
     return {
         "detail": ratios[:50],
-        "distribution": dict(ratio_counter.most_common())
+        "distribution": dict(sorted(ratio_counter.items()))
     }
 
 
@@ -168,9 +168,10 @@ def sum_analysis(limit=None):
     values = [s["sum"] for s in sums]
     return {
         "detail": sums[:50],
-        "min": min(values),
-        "max": max(values),
-        "avg": round(np.mean(values), 1),
+        "min": int(min(values)),
+        "max": int(max(values)),
+        # float() 避免 numpy.float64 泄漏到 JSON 响应
+        "avg": round(float(np.mean(values)), 1),
         "median": int(np.median(values)),
         "distribution": _histogram(values, bins=10)
     }
@@ -236,7 +237,7 @@ def consecutive_analysis(limit=None):
     return results
 
 
-def smart_recommend(strategy="balanced"):
+def smart_recommend(strategy="balanced", limit=None, recent_n=30):
     """
     智能选号推荐
     策略:
@@ -244,6 +245,9 @@ def smart_recommend(strategy="balanced"):
       - "cold": 偏向冷号（博冷）
       - "balanced": 热冷均衡
       - "random": 纯随机
+    limit: 只使用最近 limit 期数据做分析（None = 全部）。
+           **回测时必须传入**，否则会看到未来数据，回测结果失真。
+    recent_n: 冷热号统计窗口
     返回: {"main": [6个正码], "special": 特码, "strategy": 策略说明}
     """
     import random as rnd
@@ -257,9 +261,9 @@ def smart_recommend(strategy="balanced"):
             "reason": "完全随机，每个号码概率相等"
         }
 
-    freq = frequency_analysis()
-    miss = missing_values()
-    hc = hot_cold_numbers(recent_n=30, top_k=15)
+    freq = frequency_analysis(limit)
+    miss = missing_values(limit)
+    hc = hot_cold_numbers(recent_n=recent_n, top_k=15)
 
     if strategy == "hot":
         # 从热号池中加权随机选

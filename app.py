@@ -11,6 +11,7 @@ from analyzer import (
     tail_number_analysis, consecutive_analysis,
     smart_recommend, get_dashboard_data
 )
+from backtest import run_backtest, STRATEGIES, MIN_HISTORY
 from decoder import get_all_categories, decode_elements, quick_decode
 from vision import analyze_image, map_vision_to_decoder_selections, HAS_KAGGLE
 
@@ -98,6 +99,46 @@ def api_recommend():
     """智能选号推荐"""
     strategy = request.args.get("strategy", "balanced")
     return jsonify(smart_recommend(strategy))
+
+
+# ==================== 历史回测 API ====================
+
+@app.route("/api/backtest")
+def api_backtest():
+    """
+    历史命中率回测
+
+    参数:
+      strategies: 逗号分隔的策略名，默认全部（balanced,hot,cold,random）
+      min_history: 前 N 期只作历史数据，默认 30
+      max_periods: 最多回测期数，默认 200（限制耗时）
+      recent_n: 冷热号窗口，默认 30
+      seed: 随机种子，给定则结果可复现
+    """
+    raw = request.args.get("strategies", "")
+    strategies = [s.strip() for s in raw.split(",") if s.strip()] or None
+    invalid = [s for s in (strategies or []) if s not in STRATEGIES]
+    if invalid:
+        return jsonify({
+            "error": f"未知策略: {', '.join(invalid)}",
+            "available": STRATEGIES
+        }), 400
+
+    min_history = request.args.get("min_history", MIN_HISTORY, type=int)
+    max_periods = request.args.get("max_periods", 200, type=int)
+    recent_n = request.args.get("recent_n", 30, type=int)
+    seed = request.args.get("seed", None, type=int)
+
+    result = run_backtest(
+        strategies=strategies,
+        min_history=max(10, min_history),
+        max_periods=max_periods,
+        recent_n=recent_n,
+        seed=seed,
+    )
+    if "error" in result:
+        return jsonify(result), 400
+    return jsonify(result)
 
 
 # ==================== 图猜码 API ====================

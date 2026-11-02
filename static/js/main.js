@@ -38,6 +38,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
         // 懒加载
         if (btn.dataset.tab === "history") loadHistory();
         if (btn.dataset.tab === "decoder") loadDecoderCategories();
+        if (btn.dataset.tab === "backtest") loadBacktestTab();
     });
 });
 
@@ -459,6 +460,307 @@ async function generateNumbers() {
         </div>
         <div class="reason">💡 ${data.reason}</div>
     `;
+}
+
+// ==================== 策略回测 ====================
+let backtestData = null;
+let backtestLoaded = false;
+
+const STRATEGY_COLORS = {
+    balanced: "#0ea5e9",
+    hot: "#ef4444",
+    cold: "#3b82f6",
+    random: "#a855f7",
+};
+
+function loadBacktestTab() {
+    // 首次进入自动跑一次回测
+    if (!backtestLoaded) {
+        backtestLoaded = true;
+        runBacktest();
+    }
+}
+
+async function runBacktest() {
+    const statusDiv = document.getElementById("backtestStatus");
+    const contentDiv = document.getElementById("backtestContent");
+    const btn = document.getElementById("btRunBtn");
+
+    const periods = document.getElementById("btPeriods").value;
+    const minHistory = document.getElementById("btMinHistory").value;
+    const recentN = document.getElementById("btRecentN").value;
+    const seed = document.getElementById("btSeed").value;
+
+    btn.disabled = true;
+    contentDiv.style.display = "none";
+    statusDiv.innerHTML = '<div class="loading"><div class="spinner"></div> 正在逐期回测，请稍候...</div>';
+
+    const params = new URLSearchParams({
+        min_history: minHistory,
+        recent_n: recentN,
+        max_periods: periods === "0" ? "100000" : periods,
+    });
+    if (seed !== "") params.set("seed", seed);
+
+    try {
+        const res = await fetch(`/api/backtest?${params}`);
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+            statusDiv.innerHTML = `<div class="result-display"><div class="label" style="color:#ef4444;">❌ ${data.error || "回测失败"}</div></div>`;
+            btn.disabled = false;
+            return;
+        }
+
+        backtestData = data;
+        statusDiv.innerHTML = "";
+        contentDiv.style.display = "block";
+
+        renderBtStatCards();
+        renderBtVerdict();
+        renderBtMainHitsChart();
+        renderBtSpecialChart();
+        renderBtDistributionChart();
+        renderBtTable();
+    } catch (e) {
+        statusDiv.innerHTML = `<div class="result-display"><div class="label" style="color:#ef4444;">❌ 网络错误: ${e.message}</div></div>`;
+    }
+    btn.disabled = false;
+}
+
+function renderBtStatCards() {
+    const d = backtestData;
+    const meta = d.meta;
+
+    // 找出平均正码命中最好的策略
+    const entries = Object.entries(d.strategies);
+    const best = entries.reduce((a, b) =>
+        b[1].avg_main_hits > a[1].avg_main_hits ? b : a);
+    const totalSpecial = entries.reduce((s, [, v]) => s + v.special_hit_count, 0);
+
+    document.getElementById("btStatCards").innerHTML = `
+        <div class="stat-card">
+            <div class="value">${meta.periods_backtested}</div>
+            <div class="label">回测期数</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${d.baseline.avg_main_hits}</div>
+            <div class="label">随机基准（平均正码命中）</div>
+        </div>
+        <div class="stat-card">
+            <div class="value" style="color:${STRATEGY_COLORS[best[0]]};">${best[1].avg_main_hits}</div>
+            <div class="label">最优策略：${meta.strategy_names[best[0]]}</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${totalSpecial}</div>
+            <div class="label">全策略特码命中次数</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${meta.min_history}</div>
+            <div class="label">历史预热期数</div>
+        </div>
+    `;
+}
+
+function renderBtVerdict() {
+    document.getElementById("btVerdict").innerHTML =
+        `<div class="verdict-title">🔎 回测结论</div><div class="verdict-text">${backtestData.verdict}</div>`;
+}
+
+function renderBtMainHitsChart() {
+    const el = document.getElementById("chartBtMainHits");
+    const chart = echarts.init(el);
+    const d = backtestData;
+
+    const names = Object.keys(d.strategies);
+    const labels = names.map(n => d.meta.strategy_names[n]);
+    const values = names.map(n => d.strategies[n].avg_main_hits);
+    const baseline = d.baseline.avg_main_hits;
+
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            formatter: p => {
+                const i = p[0].dataIndex;
+                const diff = (values[i] - baseline).toFixed(3);
+                const sign = diff >= 0 ? "+" : "";
+                return `${labels[i]}<br/>平均命中 ${values[i]} 个正码<br/>对比随机基准 ${sign}${diff}`;
+            }
+        },
+        xAxis: {
+            type: "category",
+            data: labels,
+            axisLabel: { color: "#94a3b8", fontSize: 11, interval: 0 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value",
+            name: "个/期",
+            nameTextStyle: { color: "#94a3b8" },
+            axisLabel: { color: "#94a3b8" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: [{
+            type: "bar",
+            data: values.map((v, i) => ({
+                value: v,
+                itemStyle: { color: STRATEGY_COLORS[names[i]] }
+            })),
+            barWidth: "45%",
+            markLine: {
+                silent: true,
+                symbol: "none",
+                data: [{
+                    yAxis: baseline,
+                    lineStyle: { color: "#f59e0b", type: "dashed", width: 2 },
+                    label: {
+                        formatter: `随机基准 ${baseline}`,
+                        color: "#f59e0b",
+                        position: "insideEndTop"
+                    }
+                }]
+            }
+        }],
+        grid: { left: 50, right: 20, top: 30, bottom: 40 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderBtSpecialChart() {
+    const chart = echarts.init(document.getElementById("chartBtSpecial"));
+    const d = backtestData;
+
+    const names = Object.keys(d.strategies);
+    const labels = names.map(n => d.meta.strategy_names[n]);
+    const values = names.map(n => d.strategies[n].special_hit_rate);
+    const baseline = d.baseline.special_hit_rate;
+
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            formatter: p => {
+                const i = p[0].dataIndex;
+                const s = d.strategies[names[i]];
+                return `${labels[i]}<br/>特码命中 ${s.special_hit_count} 次<br/>命中率 ${values[i]}%`;
+            }
+        },
+        xAxis: {
+            type: "category",
+            data: labels,
+            axisLabel: { color: "#94a3b8", fontSize: 11, interval: 0 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value",
+            name: "%",
+            nameTextStyle: { color: "#94a3b8" },
+            axisLabel: { color: "#94a3b8" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: [{
+            type: "bar",
+            data: values.map((v, i) => ({
+                value: v,
+                itemStyle: { color: STRATEGY_COLORS[names[i]] }
+            })),
+            barWidth: "45%",
+            markLine: {
+                silent: true,
+                symbol: "none",
+                data: [{
+                    yAxis: baseline,
+                    lineStyle: { color: "#f59e0b", type: "dashed", width: 2 },
+                    label: {
+                        formatter: `随机基准 ${baseline}%`,
+                        color: "#f59e0b",
+                        position: "insideEndTop"
+                    }
+                }]
+            }
+        }],
+        grid: { left: 50, right: 20, top: 30, bottom: 40 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderBtDistributionChart() {
+    const chart = echarts.init(document.getElementById("chartBtDistribution"));
+    const d = backtestData;
+    const names = Object.keys(d.strategies);
+
+    // x 轴：命中 0-6 个正码
+    const buckets = ["0", "1", "2", "3", "4", "5", "6"];
+
+    chart.setOption({
+        tooltip: { trigger: "axis" },
+        legend: {
+            data: names.map(n => d.meta.strategy_names[n]),
+            textStyle: { color: "#94a3b8" },
+            top: 0
+        },
+        xAxis: {
+            type: "category",
+            data: buckets,
+            name: "命中正码个数",
+            nameTextStyle: { color: "#94a3b8" },
+            axisLabel: { color: "#94a3b8" },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value",
+            name: "期数",
+            nameTextStyle: { color: "#94a3b8" },
+            axisLabel: { color: "#94a3b8" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: names.map(n => ({
+            name: d.meta.strategy_names[n],
+            type: "bar",
+            data: buckets.map(b => d.strategies[n].hit_distribution[b] || 0),
+            itemStyle: { color: STRATEGY_COLORS[n] },
+        })),
+        grid: { left: 50, right: 20, top: 50, bottom: 40 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderBtTable() {
+    const d = backtestData;
+    const names = Object.keys(d.strategies);
+
+    const head = `
+        <thead>
+            <tr>
+                <th>策略</th>
+                <th>平均正码命中</th>
+                <th>平均总命中</th>
+                <th>命中≥1个正码</th>
+                <th>特码命中</th>
+                <th>特码命中率</th>
+                <th>单期最佳</th>
+                <th>对比随机</th>
+            </tr>
+        </thead>`;
+
+    const baseline = d.baseline.avg_main_hits;
+    const rows = names.map(n => {
+        const s = d.strategies[n];
+        const diff = s.avg_main_hits - baseline;
+        const sign = diff >= 0 ? "+" : "";
+        const color = diff >= 0 ? "#22c55e" : "#ef4444";
+        return `<tr>
+            <td style="font-weight:600; color:${STRATEGY_COLORS[n]};">${d.meta.strategy_names[n]}</td>
+            <td>${s.avg_main_hits}</td>
+            <td>${s.avg_any_hits}</td>
+            <td>${s.main_hit_rate}%</td>
+            <td>${s.special_hit_count} 次</td>
+            <td>${s.special_hit_rate}%</td>
+            <td>${s.best_main_hits} 个</td>
+            <td style="color:${color};">${sign}${diff.toFixed(3)}</td>
+        </tr>`;
+    }).join("");
+
+    document.getElementById("btTable").innerHTML = head + `<tbody>${rows}</tbody>`;
 }
 
 // ==================== 图猜码 ====================
