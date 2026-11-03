@@ -459,7 +459,7 @@ decoder.decode_elements(selections)
 - **修复**：
   1. `vision.py` 的 `_friendly_error()` 新增 `sensitive_words_detected` 分支：明确告知用户这是网关对**请求文本**的判定、与图片无关，并给出「稍后重试 / 换模型 / 保持内置提示词」的建议，而不是含糊地说"图片有问题"。
   2. `app.py` 设置页「🔌 测试连接」第③步「图片对话」**改为复用真实识图的 `VISION_SYSTEM_PROMPT` + `VISION_USER_PROMPT`**，`max_tokens` 16→512。原先用另写的一套中性探测提示词，会出现「探测失败但实际识图可用」的假阴性（现已通过真实提示词复测：三阶段全绿）。
-  3. `vision.py` 的 `analyze_image()`：`content` 为空时回退去解析 `reasoning_content`（部分推理型模型在 `max_tokens` 偏小时把输出全放 reasoning 里）；`app.py` 测试连接第③步同样加了这条回退。
+  3. `vision.py` 的 `analyze_image()`：`content` 为空时回退去解析 `reasoning_content` —— ⚠️ **此做法在 V1.4.5 被推翻**，理由见下。
 - **模型兼容性结论（服务端 autodl.art，实测）**：
   - ✅ `DeepSeek-V4.1-Flash-1017`
   - ✅ `qwen3-vl-plus`（**已切换为当前默认模型**）、✅ `qwen3.6-plus`（返回内容带 ```json 围栏，解析器已兼容）
@@ -469,6 +469,37 @@ decoder.decode_elements(selections)
   - 真实识图路径（红底白椭圆 PNG）返回 `colors: ['红','白']`、`elements: ['火','金']`、`directions: ['南']`，无 error ✅
   - `/api/decoder/vision` 全链路返回候选 37 个号码、推荐 `main=[2,18,19,24,34,35] special=40` ✅
   - `/api/settings/test` 三阶段全绿（模型列表 42 个命中 ✓ / 文本对话 ✓ / 图片对话 ✓）✅
+
+### V1.4.5 — 两个视觉模型实测对比 + 修掉 3 个真实崩溃点 (2026-11-03 16:10)
+- **负责智能体**：GLM
+- **背景**：用户问「DeepSeek-V4.1-Flash-1017 和 qwen3-vl-plus 哪个效果更好」，遂用同一张水墨玄机图（金虎/竹林/溪流/紅灯笼/「龍」字石碑）做 5~6 次重复实测。
+- **实测结论**：
+
+  | 指标 | DeepSeek-V4.1-Flash-1017 | qwen3-vl-plus |
+  |---|---|---|
+  | 可用率（识别出生肖） | **5/6** | **6/6** |
+  | 平均耗时 | 13.8s | 6.5~16.6s |
+  | 输入 token | 1295 | 2779（图片占 2496） |
+  | 输出 token | ~900（含长思考） | ~150 |
+  | 识图质量 | 虎+龙 都识别，描述详尽 | 虎+龙 都识别，描述详尽 |
+  | 稳定性 | **会输出散文/空内容** | **稳定遵守 JSON 格式** |
+
+  → **推荐 `qwen3-vl-plus` 作为默认**：格式稳定、失败率低、输出更省 token。DeepSeek 也能用，但需注意下面的坑。
+- **顺带发现并修复 3 个真实 bug**（都在 V1.4.3 引入的兜底逻辑周围）：
+  1. **`AttributeError: 'list' object has no attribute 'get'`（DeepSeek 下 2/5 必崩）**
+     根因链：DeepSeek 是推理型模型，会先输出 800~3800 字符的 `reasoning_content` 思考过程 → `max_tokens=1024` 时思考吃光预算 → `content` 为空、`finish_reason='length'` → V1.4.3 的兜底去解析 `reasoning_content`（自然语言）→ 正则从思考过程里误匹配出 JSON 片段 → `json.loads` 解析成 **list** → 上层 `.get()` 崩溃。
+     **修复**：`finish_reason == 'length'` 且 content 为空时，**加大 max_tokens 重试**（×4，至少 4096）；**彻底不解析 reasoning_content**。
+  2. **`_parse_json_response` 可能返回 list/None** → 改为内部 `_coerce()` 统一收敛成 dict（list 取首个 dict 元素，无 dict 则当 objects 列表）。
+  3. **`decoder.decode_elements()` 的 `recommended` 字段类型不一致** —— 正常是 dict，无元素时却是 `[]`（list）→ 调用方 `.get()` 崩溃。已改为**始终返回 `{"main": [...], "special": ...}`**。
+- **另外两个健壮性改进**：
+  - 重试后仍无内容 → **显式报错**（原来静默返回空，前端只显示「未识别到明显元素」，用户看不到原因）。
+  - 模型未按 JSON 格式回答（DeepSeek 偶尔输出散文）→ 显式报错并附原文摘要，不再静默。
+- **自测验证**：
+  - `_parse_json_response` 对 6 种输入（dict/含 dict 的 list/纯 list/字符串/非 JSON/夹带文本）**全部返回 dict** ✓
+  - DeepSeek 6 次真实调用：5 次可用，1 次返回明确的 502 中文错误（不再崩溃）✓
+  - qwen3-vl-plus 6 次真实调用：6/6 可用 ✓
+  - 20 个 API 端点全部 200 ✓；`decode_elements` 在 5 种入参下 `recommended` 恒为 dict ✓
+- **默认模型保持 `qwen3-vl-plus`**
 
 ### V1.4.4 — 恢复开奖数据增量同步（新增 Renavon 源） (2026-11-03 15:20)
 - **负责智能体**：GLM
