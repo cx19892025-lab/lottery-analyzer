@@ -26,7 +26,11 @@ _ZODIAC_BY_MOD = {
 
 def lunar_year_of(d=None):
     """公历日期所属农历年（以农历正月初一为界）"""
-    d = d or date.today()
+    return _lunar_year_of(d or date.today())
+
+
+@lru_cache(maxsize=1024)
+def _lunar_year_of(d):
     return LunarDate.from_solar_date(d.year, d.month, d.day).year
 
 
@@ -55,6 +59,20 @@ def get_zodiac_map(d=None):
     生肖表在农历正月初一换新，因此同一公历年 1~2 月的开奖可能仍属上一生肖年。
     """
     return dict(_zodiac_map_for(lunar_year_of(d)))
+
+
+@lru_cache(maxsize=16)
+def _inverse_zodiac_for(lunar_year):
+    """号码→生肖的反查表（按农历年缓存）"""
+    return {n: a for a, ns in _zodiac_map_for(lunar_year).items() for n in ns}
+
+
+def zodiac_of_number(number, d=None):
+    """
+    某号码在指定日期（默认今天）生肖表中的生肖。
+    历史统计须传入该期的开奖日期，否则跨年数据会算错。
+    """
+    return _inverse_zodiac_for(lunar_year_of(d))[int(number)]
 
 
 def zodiac_info(d=None):

@@ -18,6 +18,9 @@ from crawler import import_all, sync_latest, data_status
 import settings as settings_mod
 
 app = Flask(__name__)
+# 保持字典插入顺序：生肖等分布数据依赖固定顺序（鼠牛虎兔…），
+# Flask 默认会按字母重排 JSON key，导致图表横轴乱序
+app.json.sort_keys = False
 
 
 # ==================== 页面路由 ====================

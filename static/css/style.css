@@ -992,3 +992,11 @@ body {
     margin: -4px 0 10px;
     line-height: 1.5;
 }
+
+/* V1.4.2 图表说明文字（特码/生肖统计的小字备注） */
+.chart-note {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin: -6px 0 8px;
+    line-height: 1.4;
+}
