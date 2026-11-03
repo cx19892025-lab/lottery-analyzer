@@ -53,7 +53,10 @@ def build(include_key=True):
         "--clean",
         "--onedir",                      # 文件夹版：启动快、杀软误报少
         "--name", APP_NAME,
-        "--console",                     # 保留控制台窗口，用户能看到地址/报错
+        # 无控制台：双击后直接出现独立窗口，不再有黑框。
+        # 代价是看不到 print，因此 app.py 会把输出重定向到
+        # 用户数据目录的 startup.log，排错时看那个文件。
+        "--windowed",
         # 只读资源打进包
         f"--add-data=templates{sep}templates",
         f"--add-data=static{sep}static",

@@ -19,6 +19,11 @@ data/settings.json.*
 data/SHARED_BUILD
 *.spec
 
+# 独立窗口模式用的 Edge/Chrome 缓存目录
+# 会生成上千个文件、上百 MB，绝不能被 git 跟踪
+data/browser_profile/
+browser_profile/
+
 # IDE
 .vscode/
 .idea/
