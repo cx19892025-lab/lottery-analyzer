@@ -459,10 +459,14 @@ decoder.decode_elements(selections)
   2. `app.py` 设置页「🔌 测试连接」第③步「图片对话」**改为复用真实识图的 `VISION_SYSTEM_PROMPT` + `VISION_USER_PROMPT`**，`max_tokens` 16→512。原先用另写的一套中性探测提示词，会出现「探测失败但实际识图可用」的假阴性（现已通过真实提示词复测：三阶段全绿）。
   3. `vision.py` 的 `analyze_image()`：`content` 为空时回退去解析 `reasoning_content`（部分推理型模型在 `max_tokens` 偏小时把输出全放 reasoning 里）；`app.py` 测试连接第③步同样加了这条回退。
 - **模型兼容性结论（服务端 autodl.art，实测）**：
-  - ✅ `DeepSeek-V4.1-Flash-1017`（当前配置）
-  - ✅ `qwen3-vl-plus`、✅ `qwen3.6-plus`（返回内容带 ```json 围栏，解析器已兼容）
+  - ✅ `DeepSeek-V4.1-Flash-1017`
+  - ✅ `qwen3-vl-plus`（**已切换为当前默认模型**）、✅ `qwen3.6-plus`（返回内容带 ```json 围栏，解析器已兼容）
   - ❌ `qwen3.7-max`：不支持 `image_url` 格式，报 `invalid_parameter_error`（"Unexpected item type in content"）
-- **自测验证**：真实识图路径（红底白椭圆 PNG）返回 `colors: ['红色','白色']`、`description: 红色背景正中央有一个白色椭圆形图案。`，无 error；`/api/settings/test` 三阶段全绿（模型列表 42 个命中 ✓ / 文本对话 ✓ / 图片对话 ✓）✅
+- **顺带修掉「测试连接」第③步的假阴性**：原来用 **1×1 像素 PNG** 探测，而 `qwen3-vl-plus` 等模型要求宽高都 > 10px，会返回 `invalid_parameter_error` → 被误报成「该模型不支持图片输入」。已改为 **64×64 探测图**（`_PROBE_PNG`），改后三阶段全绿。
+- **自测验证**（模型 `qwen3-vl-plus`）：
+  - 真实识图路径（红底白椭圆 PNG）返回 `colors: ['红','白']`、`elements: ['火','金']`、`directions: ['南']`，无 error ✅
+  - `/api/decoder/vision` 全链路返回候选 37 个号码、推荐 `main=[2,18,19,24,34,35] special=40` ✅
+  - `/api/settings/test` 三阶段全绿（模型列表 42 个命中 ✓ / 文本对话 ✓ / 图片对话 ✓）✅
 
 ---
 
@@ -523,3 +527,4 @@ app.py ──→ database.py   (数据读写)
 - 排错顺序：设置页「🔌 测试连接」→ 看返回的中文提示（已覆盖 401/403/404/429/超时/连不上）。
 - **遇到 `sensitive_words_detected`（"图片包含敏感内容"）**：这是**服务商审核网关按请求文本**误判，与图片内容无关（详见 V1.4.3）。对策：稍后重试、换模型（`qwen3-vl-plus` / `qwen3.6-plus` 可用，`qwen3.7-max` 不支持 `image_url` 格式），不要随意改写内置识图提示词（改了反而可能触发审核）。
 - 识图提示词 `VISION_SYSTEM_PROMPT` / `VISION_USER_PROMPT` 被「测试连接」第③步与真实识图**共用**，改一处即可同时生效，不要另写探测提示词。
+- 「测试连接」第③步的探测图是 **64×64**（`_PROBE_PNG`），不要改回 1×1 —— 部分视觉模型要求宽高 > 10px，否则会被误报成「不支持看图」。
