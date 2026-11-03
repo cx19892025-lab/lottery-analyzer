@@ -53,20 +53,63 @@ def insert_result(period, draw_date, numbers, special):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (period, draw_date, *numbers, special))
         conn.commit()
+        _invalidate_cache()
     finally:
         conn.close()
 
 
-def get_all_results(limit=None):
-    """获取所有开奖记录，按期号降序"""
+def insert_many(draws):
+    """
+    批量插入开奖记录（爬虫导入用）
+    draws: [{"period","draw_date","numbers","special"}, ...]
+    返回实际新插入的条数（重复期号被忽略）
+    """
     conn = get_connection()
-    cursor = conn.cursor()
-    sql = "SELECT * FROM lottery_results ORDER BY period DESC"
-    if limit:
-        sql += f" LIMIT {int(limit)}"
-    rows = cursor.execute(sql).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    try:
+        before = conn.total_changes
+        conn.executemany("""
+            INSERT OR IGNORE INTO lottery_results
+            (period, draw_date, num1, num2, num3, num4, num5, num6, special)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [(d["period"], d["draw_date"], *d["numbers"], d["special"])
+              for d in draws])
+        conn.commit()
+        _invalidate_cache()
+        return conn.total_changes - before
+    finally:
+        conn.close()
+
+
+def clear_results():
+    """清空全部开奖记录（导入真实数据前清除模拟数据用）"""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM lottery_results")
+        conn.commit()
+        _invalidate_cache()
+    finally:
+        conn.close()
+
+
+# 只读内存缓存：真实数据 4400+ 期，回测每期每策略都会调 get_all_results，
+# 重复查 SQLite 是最大开销。写操作统一走 _invalidate_cache()。
+_result_cache = []
+
+
+def _invalidate_cache():
+    global _result_cache
+    _result_cache = []
+
+
+def get_all_results(limit=None):
+    """获取所有开奖记录，按期号降序（带内存缓存，写操作自动失效）"""
+    global _result_cache
+    if not _result_cache:
+        conn = get_connection()
+        _result_cache = [dict(r) for r in conn.execute(
+            "SELECT * FROM lottery_results ORDER BY period DESC").fetchall()]
+        conn.close()
+    return _result_cache[:limit] if limit else _result_cache
 
 
 def get_results_count():

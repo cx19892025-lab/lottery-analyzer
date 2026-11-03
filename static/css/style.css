@@ -929,3 +929,54 @@ body {
     .grid-3, .grid-4 { grid-template-columns: 1fr; }
     .strategy-btns { flex-direction: column; }
 }
+
+/* ==================== V1.4 统计窗口工具栏 + 数据管理 ==================== */
+
+.dashboard-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.window-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.window-picker select {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.window-picker select:focus {
+    outline: none;
+    border-color: var(--accent-2);
+}
+
+.data-status-row {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 12px 0;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+@media (max-width: 600px) {
+    .dashboard-toolbar {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

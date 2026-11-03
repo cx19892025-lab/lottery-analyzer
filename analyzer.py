@@ -317,18 +317,23 @@ def smart_recommend(strategy="balanced", limit=None, recent_n=30):
         }
 
 
-def get_dashboard_data():
+def get_dashboard_data(window=500):
     """
     获取仪表盘汇总数据（一次性返回所有分析结果）
+    window: 统计窗口，只分析最近 N 期（真实数据 4400+ 期，全量统计太慢且
+            远期号码对选号参考价值有限）。None/0 表示全量。
+    total_periods 始终返回库内全部期数，前端可区分"已加载"与"统计窗口"。
     """
+    limit = int(window) if window else None
     return {
-        "frequency": frequency_analysis(),
+        "window": limit,
+        "frequency": frequency_analysis(limit),
         "hot_cold": hot_cold_numbers(),
-        "missing": missing_values(),
-        "odd_even": odd_even_analysis(),
-        "big_small": big_small_analysis(),
-        "sum": sum_analysis(),
-        "tail": tail_number_analysis(),
-        "consecutive": consecutive_analysis(),
+        "missing": missing_values(limit),
+        "odd_even": odd_even_analysis(limit),
+        "big_small": big_small_analysis(limit),
+        "sum": sum_analysis(limit),
+        "tail": tail_number_analysis(limit),
+        "consecutive": consecutive_analysis(limit),
         "total_periods": len(get_all_results()),
     }

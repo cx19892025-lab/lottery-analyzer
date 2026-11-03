@@ -38,7 +38,19 @@
             </div>
 
             <div id="dashboardContent" style="display:none;">
-                <!-- 概览卡片 -->
+                <!-- 统计窗口切换 + 概览卡片 -->
+                <div class="dashboard-toolbar">
+                    <span id="dataInfo"></span>
+                    <label class="window-picker" for="windowSelect">统计窗口
+                        <select id="windowSelect" onchange="loadDashboard()">
+                            <option value="100">近100期</option>
+                            <option value="300">近300期</option>
+                            <option value="500" selected>近500期</option>
+                            <option value="1000">近1000期</option>
+                            <option value="0">全部</option>
+                        </select>
+                    </label>
+                </div>
                 <div class="stat-cards" id="statCards"></div>
 
                 <!-- 频率分析 + 热力图 -->
@@ -356,6 +368,37 @@
                 </div>
 
                 <div id="settingsStatus"></div>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="icon">🗄️</span> 数据管理</div>
+
+                <div class="settings-note">
+                    开奖数据来自 GitHub 上自动同步<b>香港赛马会官方开奖</b>的开源数据集
+                    （1993 年至今约 4400 期，国内直连可用，无需翻墙）。
+                    导入会<b>清空并替换</b>当前的模拟数据。
+                </div>
+
+                <div class="data-status-row" id="dataStatusRow">
+                    <span id="dataStatusText">正在读取本地数据状态...</span>
+                </div>
+
+                <div class="settings-actions">
+                    <button class="generate-btn" id="importDataBtn" onclick="importRealData()">
+                        📥 导入真实历史数据
+                    </button>
+                    <button class="ghost-btn" id="syncDataBtn" onclick="syncLatestData()">
+                        🔄 同步最新开奖
+                    </button>
+                    <button class="ghost-btn" onclick="loadDataStatus()">↩️ 刷新状态</button>
+                </div>
+
+                <div id="dataStatusResult"></div>
+
+                <div class="settings-hint" style="margin-top:10px;">
+                    「同步最新开奖」只补新期号，不动已有数据；数据源每天由 CI 自动更新一次，
+                    开奖当晚同步可能仍差最新一期，属正常现象。
+                </div>
             </div>
 
             <div class="card">
