@@ -73,6 +73,10 @@ async function loadDashboard() {
         renderTailChart();
         renderSumChart();
         renderConsecutiveChart();
+        renderSpecialFreqChart();
+        renderSpecialColorChart();
+        renderSpecialZodiacChart();
+        renderMainZodiacChart();
     } catch (e) {
         document.getElementById("dashboardLoading").innerHTML =
             `<span style="color:#ef4444;">❌ 加载失败: ${e.message}</span>`;
@@ -442,6 +446,172 @@ function renderConsecutiveChart() {
                 fontWeight: "bold"
             }
         }]
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+// ==================== 特码 / 生肖专项统计 ====================
+
+const WAVE_COLORS = { "红波": "#ef4444", "蓝波": "#3b82f6", "绿波": "#22c55e" };
+
+function renderSpecialFreqChart() {
+    const chart = echarts.init(document.getElementById("chartSpecialFreq"));
+    const s = (dashboardData.special_stats || {});
+    if (!s.frequency) return;
+
+    const nums = Object.keys(s.frequency).map(Number).sort((a, b) => a - b);
+    const values = nums.map(n => s.frequency[n]);
+    const colors = nums.map(n => WAVE_COLORS[s.color_of_number[n]] || "#334155");
+
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            formatter: p => `${p[0].axisValue} 号<br/>开奖 ${p[0].value} 次`
+                + `（期望 ${s.expected_per_number}）`
+        },
+        xAxis: {
+            type: "category",
+            data: nums,
+            axisLabel: { color: "#94a3b8", fontSize: 10 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value",
+            axisLabel: { color: "#94a3b8" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: [{
+            type: "bar",
+            data: values.map((v, i) => ({ value: v, itemStyle: { color: colors[i] } })),
+            barWidth: "60%",
+            markLine: {
+                silent: true,
+                symbol: "none",
+                lineStyle: { color: "#f59e0b", type: "dashed", width: 1 },
+                label: { color: "#f59e0b", formatter: "期望 {c}", fontSize: 10 },
+                data: [{ yAxis: s.expected_per_number }]
+            }
+        }],
+        grid: { left: 40, right: 16, top: 16, bottom: 30 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderSpecialColorChart() {
+    const chart = echarts.init(document.getElementById("chartSpecialColor"));
+    const s = (dashboardData.special_stats || {});
+    if (!s.color) return;
+
+    chart.setOption({
+        tooltip: { trigger: "item" },
+        legend: {
+            bottom: 0,
+            textStyle: { color: "#94a3b8", fontSize: 11 },
+            itemWidth: 10, itemHeight: 10,
+        },
+        series: [{
+            type: "pie",
+            radius: ["40%", "62%"],
+            center: ["50%", "45%"],
+            data: Object.keys(s.color).map(c => ({
+                name: c,
+                value: s.color[c],
+                itemStyle: { color: WAVE_COLORS[c] },
+            })),
+            label: { color: "#e2e8f0", formatter: "{b}\n{d}%" },
+        }],
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderSpecialZodiacChart() {
+    const chart = echarts.init(document.getElementById("chartSpecialZodiac"));
+    const s = (dashboardData.special_stats || {});
+    if (!s.zodiac) return;
+
+    const animals = Object.keys(s.zodiac);
+    const avg = s.total / 12;
+
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            formatter: p => {
+                const a = p[0].axisValue;
+                return `${a}<br/>特码出现 ${p[0].value} 次（${s.zodiac_pct[a]}%）`;
+            }
+        },
+        xAxis: {
+            type: "category",
+            data: animals,
+            axisLabel: { color: "#e2e8f0", fontSize: 12 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value",
+            axisLabel: { color: "#94a3b8" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: [{
+            type: "bar",
+            data: animals.map(a => s.zodiac[a]),
+            barWidth: "55%",
+            itemStyle: { color: "#e94560" },
+            markLine: {
+                silent: true,
+                symbol: "none",
+                lineStyle: { color: "#f59e0b", type: "dashed", width: 1 },
+                label: { color: "#f59e0b", formatter: "期望 {c}", fontSize: 10 },
+                data: [{ yAxis: Number(avg.toFixed(1)) }]
+            }
+        }],
+        grid: { left: 40, right: 16, top: 16, bottom: 30 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderMainZodiacChart() {
+    const chart = echarts.init(document.getElementById("chartMainZodiac"));
+    const m = (dashboardData.main_zodiac || {});
+    if (!m.counts) return;
+
+    const animals = Object.keys(m.counts);
+    const maxKey = animals.reduce((a, b) => m.counts[b] > m.counts[a] ? b : a);
+
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            formatter: p => {
+                const a = p[0].axisValue;
+                return `${a}<br/>正码出现 ${p[0].value} 次（${m.pct[a]}%）<br/>期望 ${m.expected} 次`;
+            }
+        },
+        xAxis: {
+            type: "category",
+            data: animals,
+            axisLabel: { color: "#e2e8f0", fontSize: 12 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value",
+            axisLabel: { color: "#94a3b8" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: [{
+            type: "bar",
+            data: animals.map(a => ({
+                value: m.counts[a],
+                itemStyle: { color: a === maxKey ? "#e94560" : "#3b82f6" },
+            })),
+            barWidth: "55%",
+            markLine: {
+                silent: true,
+                symbol: "none",
+                lineStyle: { color: "#f59e0b", type: "dashed", width: 1 },
+                label: { color: "#f59e0b", formatter: "期望 {c}", fontSize: 10 },
+                data: [{ yAxis: m.expected }]
+            }
+        }],
+        grid: { left: 46, right: 16, top: 16, bottom: 30 },
     });
     window.addEventListener("resize", () => chart.resize());
 }

@@ -5,9 +5,14 @@
 import pandas as pd
 import numpy as np
 from collections import Counter
+from datetime import date
 from database import get_all_results
+from decoder import COLOR_MAP, ZODIAC_ORDER, zodiac_of_number
 
 NUM_RANGE = range(1, 50)  # 1-49
+
+# 号码→波色 反查表（与解码器共用同一份口径，避免两处不一致）
+COLOR_OF_NUMBER = {n: c for c, ns in COLOR_MAP.items() for n in ns}
 
 
 def _load_dataframe(limit=None):
@@ -237,6 +242,66 @@ def consecutive_analysis(limit=None):
     return results
 
 
+def special_stats(limit=None):
+    """
+    特码单独统计：号码频次、生肖分布、波色分布。
+    生肖按各期开奖日期的农历年表换算（生肖表每年轮换，跨年不能套同一张表）。
+    """
+    results = get_all_results(limit)
+    total = len(results)
+    if total == 0:
+        return {}
+
+    freq = {n: 0 for n in NUM_RANGE}
+    zodiac = Counter()
+    color = Counter()
+
+    for r in results:
+        sp = int(r["special"])
+        freq[sp] += 1
+        zodiac[zodiac_of_number(sp, date.fromisoformat(r["draw_date"]))] += 1
+        color[COLOR_OF_NUMBER[sp]] += 1
+
+    ranked = sorted(NUM_RANGE, key=lambda n: (-freq[n], n))
+    return {
+        "total": total,
+        "frequency": freq,
+        "expected_per_number": round(total / 49, 2),
+        "top_numbers": [[n, freq[n]] for n in ranked[:5]],
+        "bottom_numbers": [[n, freq[n]] for n in ranked[-5:]][::-1],
+        "zodiac": {a: zodiac.get(a, 0) for a in ZODIAC_ORDER},
+        "zodiac_pct": {a: round(zodiac.get(a, 0) / total * 100, 2) for a in ZODIAC_ORDER},
+        "color": {c: color.get(c, 0) for c in ("红波", "蓝波", "绿波")},
+        "color_pct": {c: round(color.get(c, 0) / total * 100, 2) for c in ("红波", "蓝波", "绿波")},
+        "color_of_number": COLOR_OF_NUMBER,
+    }
+
+
+def main_zodiac_stats(limit=None):
+    """
+    正码（6 个主号）的生肖分布。
+    每期按该期开奖日期的生肖表换算，再做全窗口汇总。
+    """
+    results = get_all_results(limit)
+    if not results:
+        return {}
+
+    counts = Counter()
+    for r in results:
+        d = date.fromisoformat(r["draw_date"])
+        for i in range(1, 7):
+            counts[zodiac_of_number(int(r[f"num{i}"]), d)] += 1
+
+    total_numbers = 6 * len(results)
+    return {
+        "total_numbers": total_numbers,
+        "counts": {a: counts.get(a, 0) for a in ZODIAC_ORDER},
+        "pct": {a: round(counts.get(a, 0) / total_numbers * 100, 2) for a in ZODIAC_ORDER},
+        # 12 生肖均分时的期望值，供前端画参考线
+        "expected": round(total_numbers / 12, 2),
+    }
+
+
 def smart_recommend(strategy="balanced", limit=None, recent_n=30):
     """
     智能选号推荐
@@ -335,5 +400,7 @@ def get_dashboard_data(window=500):
         "sum": sum_analysis(limit),
         "tail": tail_number_analysis(limit),
         "consecutive": consecutive_analysis(limit),
+        "special_stats": special_stats(limit),
+        "main_zodiac": main_zodiac_stats(limit),
         "total_periods": len(get_all_results()),
     }
