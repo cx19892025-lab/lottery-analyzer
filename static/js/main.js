@@ -3,6 +3,80 @@
  * ECharts 图表渲染 + API 交互 + 图猜码解码
  */
 
+/**
+ * 候选号码的悬浮提示：把该号码的命中线索拼成一行文本。
+ * 用于「候选号码权重排行」里的 title 属性。
+ */
+function reasonTooltip(decode, number, score) {
+    const reasons = decode.reasons || {};
+    const list = reasons[String(number)] || [];
+    if (list.length === 0) return `权重 ${score}`;
+    const parts = list.map(r => `${r.dim}·${r.label}(+${r.weight})`);
+    return `权重 ${score}｜${parts.join("，")}`;
+}
+
+// ==================== 推荐理由渲染 ====================
+
+/**
+ * 渲染每个推荐号码的「为什么是它」。
+ *
+ * 后端 decode_elements 会为每个号码返回 reasons 数组，形如
+ *   [{dim:"数字", label:"8", weight:5, desc:"图上直接出现数字「8」"}, ...]
+ * 这里按维度分组展示，让用户看懂「8 号为什么被推荐」。
+ */
+function renderReasonList(decode, numbers) {
+    const reasons = decode.reasons;
+    if (!reasons || !numbers || numbers.length === 0) return "";
+
+    const scoreOf = {};
+    (decode.all_candidates || []).forEach(c => { scoreOf[c.number] = c.score; });
+
+    const rows = numbers.map(n => {
+        const list = reasons[String(n)] || reasons[n] || [];
+        if (list.length === 0) {
+            return `<div class="reason-row">
+                <span class="ball ${getBallColor(n)}">${n}</span>
+                <div class="reason-body"><span class="reason-empty">无直接线索</span></div>
+            </div>`;
+        }
+        // 按维度归并：同一维度可能命中多次（如两个关键词都指向火）
+        const byDim = {};
+        list.forEach(r => {
+            (byDim[r.dim] = byDim[r.dim] || []).push(r);
+        });
+        const dimIcons = {
+            "数字": "🔢", "数量": "🔢", "生肖": "🐾", "五行": "☯️",
+            "色波": "🎨", "方位": "🧭",
+        };
+        const chips = Object.entries(byDim).map(([dim, rs]) => {
+            const icon = dimIcons[dim] || "•";
+            const labels = [...new Set(rs.map(r => r.label))].join("/");
+            const w = rs.reduce((s, r) => s + r.weight, 0);
+            // desc 是「图上什么导致这条线索」，例如「图上刻字「龍」」「图中出现「马」」
+            const descs = [...new Set(rs.map(r => r.desc))].filter(Boolean);
+            const title = descs.join("；");
+            return `<span class="reason-chip dim-${dim}" title="${title}">
+                ${icon} ${dim}·${labels} <b>+${w}</b>
+            </span>`;
+        }).join("");
+
+        return `<div class="reason-row">
+            <span class="ball ${getBallColor(n)}">${n}</span>
+            <div class="reason-body">
+                <div class="reason-score">总权重 ${scoreOf[n] ?? "?"}</div>
+                <div class="reason-chips">${chips}</div>
+            </div>
+        </div>`;
+    }).join("");
+
+    return `
+        <div class="reason-box">
+            <div class="reason-title">💡 推荐理由</div>
+            ${rows}
+        </div>
+    `;
+}
+
 // ==================== 全局状态 ====================
 let dashboardData = null;
 let currentStrategy = "balanced";
@@ -1439,6 +1513,11 @@ async function doVisionDecode(imageDataUrl, mimeType) {
                 </div>
             `;
 
+            // 推荐理由（每个号码为什么被选中）
+            resultDiv.innerHTML += renderReasonList(
+                decode, [...rec.main, rec.special].filter(n => n != null)
+            );
+
             // 候选号码排行
             if (decode.all_candidates && decode.all_candidates.length > 0) {
                 const top15 = decode.all_candidates.slice(0, 15);
@@ -1447,7 +1526,7 @@ async function doVisionDecode(imageDataUrl, mimeType) {
                         <div style="color:var(--text-secondary); font-size:13px; margin-bottom:8px;">📊 候选号码权重排行</div>
                         <div class="balls-row">
                             ${top15.map(c => `
-                                <span class="ball ${getBallColor(c.number)}" title="权重: ${c.score}"
+                                <span class="ball ${getBallColor(c.number)}" title="${reasonTooltip(decode, c.number, c.score)}"
                                       style="opacity:${0.4 + c.score / (top15[0].score) * 0.6}">
                                     ${c.number}
                                 </span>
@@ -1534,6 +1613,11 @@ async function doDecode() {
         </div>
     `;
 
+    // 推荐理由（每个号码为什么被选中）
+    resultDiv.innerHTML += renderReasonList(
+        data, [...rec.main, rec.special].filter(n => n != null)
+    );
+
     // 候选号码排行
     if (data.all_candidates && data.all_candidates.length > 0) {
         const top15 = data.all_candidates.slice(0, 15);
@@ -1542,7 +1626,7 @@ async function doDecode() {
                 <div style="color:var(--text-secondary); font-size:13px; margin-bottom:8px;">📊 候选号码权重排行</div>
                 <div class="balls-row">
                     ${top15.map(c => `
-                        <span class="ball ${getBallColor(c.number)}" title="权重: ${c.score}"
+                        <span class="ball ${getBallColor(c.number)}" title="${reasonTooltip(data, c.number, c.score)}"
                               style="opacity:${0.4 + c.score / (top15[0].score) * 0.6}">
                             ${c.number}
                         </span>

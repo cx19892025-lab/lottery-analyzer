@@ -787,6 +787,76 @@ body {
 .vision-tag.character { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border-color: rgba(56, 189, 248, 0.3); font-weight: 600; }
 .vision-tag.count { background: rgba(250, 204, 21, 0.15); color: #facc15; border-color: rgba(250, 204, 21, 0.3); }
 
+/* ===== 推荐理由（V1.4.9）===== */
+.reason-box {
+    margin-top: 16px;
+    padding: 14px 16px;
+    background: rgba(14, 165, 233, 0.06);
+    border: 1px solid rgba(56, 189, 248, 0.22);
+    border-radius: 12px;
+}
+
+.reason-title {
+    font-size: 13px;
+    color: #38bdf8;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+.reason-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px dashed rgba(148, 163, 184, 0.15);
+}
+.reason-row:last-child { border-bottom: none; }
+
+.reason-row .ball {
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.reason-body { flex: 1; min-width: 0; }
+
+.reason-score {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.reason-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.reason-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    background: rgba(148, 163, 184, 0.12);
+    color: #cbd5e1;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    cursor: help;
+}
+.reason-chip b { color: #f8fafc; }
+
+/* 按维度着色，和 trace 里的图标色呼应 */
+.reason-chip.dim-数字  { background: rgba(250, 204, 21, 0.14); color: #facc15; border-color: rgba(250, 204, 21, 0.3); }
+.reason-chip.dim-数量  { background: rgba(250, 204, 21, 0.10); color: #fbbf24; border-color: rgba(250, 204, 21, 0.24); }
+.reason-chip.dim-生肖  { background: rgba(239, 68, 68, 0.15); color: #ef4444; border-color: rgba(239, 68, 68, 0.3); }
+.reason-chip.dim-五行  { background: rgba(16, 185, 129, 0.15); color: #10b981; border-color: rgba(16, 185, 129, 0.3); }
+.reason-chip.dim-色波  { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border-color: rgba(245, 158, 11, 0.3); }
+.reason-chip.dim-方位  { background: rgba(139, 92, 246, 0.15); color: #a78bfa; border-color: rgba(139, 92, 246, 0.3); }
+
+.reason-empty {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
 .decode-category {
     margin-bottom: 20px;
 }

@@ -4,7 +4,7 @@
 """
 import json
 import os
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import date
 from functools import lru_cache
 
@@ -192,14 +192,29 @@ def decode_elements(selections):
         "all_candidates": [所有候选号码及权重],
         "recommended": [推荐号码Top7],
         "decode_trace": [解码过程说明],
+        "reasons": {号码: [该号码被命中的线索及权重]},
         "zodiac_table": {当前生效的生肖表信息}
     }
     """
     # 号码权重计数器
     score = Counter()
+    # reasons[n] = 号码 n 被哪些线索命中，形如
+    #   [{"dim": "生肖", "label": "龙", "weight": 3, "desc": "..."}, ...]
+    # 有了它才能给用户解释「为什么推荐这个号码」，而不只是甩一个总分。
+    reasons = defaultdict(list)
     trace = []
     zmap = get_zodiac_map()          # 当前农历年生效的生肖表
     zinfo = zodiac_info()
+
+    def _add(n, w, dim, label, desc):
+        """给号码 n 加权 w 分，并记下这条线索（供前端展示理由）。"""
+        score[n] += w
+        reasons[n].append({
+            "dim": dim,
+            "label": label,
+            "weight": w,
+            "desc": desc,
+        })
 
     # 1~4. 生肖 / 五行 / 色波 / 方位
     #
@@ -224,13 +239,23 @@ def decode_elements(selections):
                 + (f"（{note}）" if note else "")
             )
             return False
+        # evidence[维度][线索] = 该线索来自图上什么（由 vision.map_vision_to_decoder_selections 提供）
+        evidence = (selections.get("evidence") or {}).get(_dim_key(dim_name), {})
         for v in hit:
             nums = mapping[v]
+            descs = evidence.get(v) or []
+            desc = "；".join(descs) if descs else f"{dim_name}命中：{v}"
             for n in nums:
-                score[n] += weight
+                _add(n, weight, dim_name, v, desc)
             trace.append(f"{icon} {dim_name}【{v}】→ 号码 {nums}"
                          + (f"（{item_note}）" if item_note else ""))
         return True
+
+    def _dim_key(dim_name):
+        """维度中文名 → evidence 字典的键（生肖/五行/色波/方位）。"""
+        return {"生肖": "zodiac", "五行": "wuxing", "色波": "color", "方位": "direction"}.get(
+            dim_name, dim_name
+        )
 
     _apply_dimension("生肖", selections.get("zodiac", []), zmap, 3, "🐾",
                      note=f"{zinfo['lunar_year']} {zinfo['animal']}年表",
@@ -254,31 +279,31 @@ def decode_elements(selections):
             if mapped in zmap:
                 nums = zmap[mapped]
                 for n in nums:
-                    score[n] += 3
+                    _add(n, 3, "生肖", mapped, f"图中「{kw}」指向生肖{mapped}")
                 trace.append(f"🔍 关键词【{kw}】→ 生肖{mapped} → {nums}")
             elif mapped in WUXING_MAP:
                 nums = WUXING_MAP[mapped]
                 for n in nums:
-                    score[n] += 2
+                    _add(n, 2, "五行", mapped, f"图中「{kw}」指向五行{mapped}")
                 trace.append(f"🔍 关键词【{kw}】→ 五行{mapped} → {nums}")
             elif mapped in COLOR_MAP:
                 nums = COLOR_MAP[mapped]
                 for n in nums:
-                    score[n] += 2
+                    _add(n, 2, "色波", mapped, f"图中「{kw}」指向{mapped}")
                 trace.append(f"🔍 关键词【{kw}】→ {mapped} → {nums}")
 
     # 6. 处理图上直接写出的数字（强线索，权重 5）
     #    「石碑上刻着 8」这类是玄机图里最直接的号码暗示，比生肖/五行更具体。
     for n in selections.get("numbers", []):
         if 1 <= n <= 49:
-            score[n] += 5
+            _add(n, 5, "数字", str(n), f"图上直接出现数字「{n}」")
             trace.append(f"🔢 图上数字【{n}】→ 号码 {n}（直接暗示，权重 +5）")
 
     # 7. 处理数量推出的数字（弱线索，权重 2）
     #    「三盏灯笼」→ 3，间接但仍是线索。
     for n in selections.get("count_numbers", []):
         if 1 <= n <= 49:
-            score[n] += 2
+            _add(n, 2, "数量", str(n), f"图中元素数量为「{n}」")
             trace.append(f"🔢 数量线索【{n}】→ 号码 {n}（数量推出，权重 +2）")
 
     # 方位维度若因覆盖全部号码而失效，已由 _apply_dimension 写进 trace，此处不再重复
@@ -290,7 +315,9 @@ def decode_elements(selections):
         return {
             "all_candidates": [],
             "recommended": {"main": [], "special": None},
-            "decode_trace": trace + ["⚠️ 未选择任何解码元素"]
+            "decode_trace": trace + ["⚠️ 未选择任何解码元素"],
+            "reasons": {},
+            "zodiac_table": zinfo,
         }
 
     # 按权重排序
@@ -307,6 +334,11 @@ def decode_elements(selections):
         "all_candidates": [{"number": n, "score": s} for n, s in sorted_candidates],
         "recommended": recommended,
         "decode_trace": trace,
+        # 每个号码的命中线索，按权重从高到低 —— 前端据此展示"推荐理由"
+        "reasons": {
+            str(n): sorted(reasons[n], key=lambda r: -r["weight"])
+            for n in score
+        },
         "zodiac_table": zinfo,
     }
 

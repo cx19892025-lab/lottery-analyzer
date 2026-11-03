@@ -426,7 +426,17 @@ def map_vision_to_decoder_selections(vision_result: dict) -> dict:
         "keywords": [],
         "numbers": [],
         "count_numbers": [],
+        # evidence[维度][线索] = 该线索**来自图上什么**的证据描述。
+        # 没有它，前端只能说「命中生肖龙」，用户仍不知道是画的龙还是刻的「龍」字。
+        "evidence": {"zodiac": {}, "wuxing": {}, "color": {}, "direction": {}},
     }
+
+    def _ev(dim, value, text):
+        """记录某条线索的图上证据（同一线索多次命中时合并去重）。"""
+        bucket = selections["evidence"][dim]
+        bucket.setdefault(value, [])
+        if text not in bucket[value]:
+            bucket[value].append(text)
 
     # 动物 → 生肖
     ANIMAL_TO_ZODIAC = {
@@ -457,6 +467,7 @@ def map_vision_to_decoder_selections(vision_result: dict) -> dict:
             if key in animal:
                 if zodiac not in selections["zodiac"]:
                     selections["zodiac"].append(zodiac)
+                _ev("zodiac", zodiac, f"图中出现「{animal}」")
 
     # 颜色 → 色波
     COLOR_TO_WAVE = {
@@ -471,6 +482,7 @@ def map_vision_to_decoder_selections(vision_result: dict) -> dict:
             if key in color:
                 if wave not in selections["color"]:
                     selections["color"].append(wave)
+                _ev("color", wave, f"图中颜色为「{color}」")
 
     # 自然元素 → 五行
     ELEMENT_TO_WUXING = {
@@ -487,6 +499,7 @@ def map_vision_to_decoder_selections(vision_result: dict) -> dict:
             if key in elem:
                 if wuxing not in selections["wuxing"]:
                     selections["wuxing"].append(wuxing)
+                _ev("wuxing", wuxing, f"图中元素「{elem}」")
 
     # 方位
     #
@@ -510,6 +523,7 @@ def map_vision_to_decoder_selections(vision_result: dict) -> dict:
             if key in direction:
                 if d not in selections["direction"]:
                     selections["direction"].append(d)
+                _ev("direction", d, f"图中位置「{direction}」")
                 break  # 一条描述只取一个方位
 
     # 注意：方位若集齐四象限（覆盖全部 1-49），该维度会被中和。
@@ -529,11 +543,15 @@ def map_vision_to_decoder_selections(vision_result: dict) -> dict:
     for ch in vision_result.get("characters", []):
         ch = _norm(str(ch))
         for key, zodiac in CHAR_TO_ZODIAC.items():
-            if key in ch and zodiac not in selections["zodiac"]:
-                selections["zodiac"].append(zodiac)
+            if key in ch:
+                if zodiac not in selections["zodiac"]:
+                    selections["zodiac"].append(zodiac)
+                _ev("zodiac", zodiac, f"图上刻字「{ch}」")
         for key, wuxing in CHAR_TO_WUXING.items():
-            if key in ch and wuxing not in selections["wuxing"]:
-                selections["wuxing"].append(wuxing)
+            if key in ch:
+                if wuxing not in selections["wuxing"]:
+                    selections["wuxing"].append(wuxing)
+                _ev("wuxing", wuxing, f"图上刻字「{ch}」")
 
     # 数字线索 → 具体号码
     #
