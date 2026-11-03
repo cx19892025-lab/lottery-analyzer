@@ -3,23 +3,31 @@
 
 数据源策略（2026-11 调研结论，均为国内可直连）：
   HKJC 官方接口 bet.hkjc.com 本机直连超时（被墙），不可用；
-  改用 GitHub 上由 CI 自动同步 HKJC 官方数据的开源数据集，
-  经 raw.githubusercontent.com 拉取（已实测本机直连 200）：
+  改用第三方镜像 / GitHub 上由 CI 自动同步 HKJC 官方数据的开源数据集：
 
   1) icelam/mark-six-data-visualization  data/all.json
      覆盖 1993-01 ~ 2025-12（源自 HKJC 官方 JSON），用作全量种子
   2) stevetsang852/marksix-rd            data/processed/draws.json
      覆盖 2002-07 ~ 至今，GitHub Actions 每日同步 HKJC，用作增量更新
+     ⚠ 其 CI 自 2026-10-29 起 "Commit snapshots" 步骤失败（仓库 Workflow 权限只读），
+       数据停在 2026-10-03，不可靠
+  3) renavon.com  /data/hkjc/hkjc_marksix_results/download/csv
+     覆盖 1993-01 ~ 至今，每期开奖后更新，实测可直连（需浏览器 UA），
+     用作**首选增量源**
 
-  两源期号格式一致（YY/SSS），按期号合并去重；重叠期若号码不一致
+  三源期号统一为 YYYYSSS，按期号合并去重；重叠期若号码不一致
   以 icelam 为准（更早入库、来源为官方历史缓存），冲突数会在结果中报告。
+  实测：Renavon 与库内 4393 期重叠部分零冲突、零日期差异。
 
 公开接口：
   import_all(clear=True)  全量导入（种子 + 增量源合并）
-  sync_latest()           增量同步最新开奖（仅增量源，INSERT OR IGNORE）
+  sync_latest()           增量同步最新开奖（增量源合并，INSERT OR IGNORE）
   data_status()           本地库数据概况
 """
 import urllib.request
+import gzip
+import csv
+import io
 import json
 
 from database import (
@@ -27,11 +35,16 @@ from database import (
     get_results_count, clear_results,
 )
 
-# 数据源地址（raw.githubusercontent.com 国内可直连）
+# 数据源地址（raw.githubusercontent.com / renavon.com 国内可直连）
 SEED_URL = "https://raw.githubusercontent.com/icelam/mark-six-data-visualization/master/data/all.json"
 LATEST_URL = "https://raw.githubusercontent.com/stevetsang852/marksix-rd/main/data/processed/draws.json"
+RENAVON_URL = "https://renavon.com/data/hkjc/hkjc_marksix_results/download/csv"
 
 REQUEST_TIMEOUT = 30  # 秒
+
+# 浏览器 UA：renavon 对非浏览器 UA 会返回 403
+_BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 
 def _fetch_json(url):
@@ -42,6 +55,25 @@ def _fetch_json(url):
     })
     with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+def _fetch_renavon_csv():
+    """
+    抓取 Renavon 的开奖结果 CSV。
+    响应体实测为 gzip 压缩但未声明 Content-Encoding，故按魔数自行判断。
+    """
+    req = urllib.request.Request(RENAVON_URL, headers={
+        "User-Agent": _BROWSER_UA,
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate",
+    })
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        body = resp.read()
+    if body[:2] == b"\x1f\x8b":
+        body = gzip.decompress(body)
+    # utf-8-sig：文件带 BOM，否则第一个列名会变成 "﻿draw_record_id"
+    return body.decode("utf-8-sig", "replace")
+
 
 
 def _yy_to_year(yy):
@@ -116,6 +148,35 @@ def _normalize_marksix_rd(records):
     return out
 
 
+def _normalize_renavon(csv_text):
+    """
+    Renavon CSV → 统一结构
+    列: draw_year, draw_number_in_year, draw_date, ball_1..ball_6, extra_ball
+    draw_date 形如 "2026-10-31+08:00"，需去掉时区后缀
+    """
+    out = []
+    for r in csv.DictReader(io.StringIO(csv_text)):
+        # 只取已开奖的期次
+        if r.get("has_results") != "1":
+            continue
+        try:
+            year = int(r["draw_year"])
+            seq = int(r["draw_number_in_year"])
+            draw_date = r["draw_date"].split("+")[0].split("T")[0]
+            numbers = sorted(int(r[f"ball_{i}"]) for i in range(1, 7))
+            special = int(r["extra_ball"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        out.append({
+            "period": f"{year:04d}{seq:03d}",
+            "draw_date": draw_date,
+            "numbers": numbers,
+            "special": special,
+            "source": "renavon",
+        })
+    return out
+
+
 def _dedupe_merge(seed_draws, latest_draws):
     """
     按期号合并两源：
@@ -140,18 +201,41 @@ def _dedupe_merge(seed_draws, latest_draws):
     return merged, conflicts
 
 
+def _fetch_optional_sources():
+    """
+    抓取两个增量源。任一源失败不影响另一个（降级而非整体报错）。
+    返回: (list of (source_name, draws), list of (source_name, error_message))
+    """
+    results, errors = [], []
+
+    try:
+        results.append(("renavon", _normalize_renavon(_fetch_renavon_csv())))
+    except Exception as e:
+        errors.append(("renavon", f"{type(e).__name__}: {e}"))
+
+    try:
+        results.append(("marksix-rd", _normalize_marksix_rd(_fetch_json(LATEST_URL))))
+    except Exception as e:
+        errors.append(("marksix-rd", f"{type(e).__name__}: {e}"))
+
+    return results, errors
+
+
 def fetch_real_data():
     """
-    抓取并合并两源真实开奖数据（不写库）
-    返回: {"draws": [...], "stats": {...}}；抓取失败抛出异常由路由层翻译
+    抓取并合并多源真实开奖数据（不写库）
+    种子源（icelam）失败会抛异常——没有它就没有历史；
+    增量源失败只记录在 stats 里，不影响导入。
+    返回: {"draws": [...], "stats": {...}}
     """
-    seed_raw = _fetch_json(SEED_URL)
-    latest_raw = _fetch_json(LATEST_URL)
+    seed_draws = _normalize_icelam(_fetch_json(SEED_URL))
+    incremental, errors = _fetch_optional_sources()
 
-    seed_draws = _normalize_icelam(seed_raw)
-    latest_draws = _normalize_marksix_rd(latest_raw)
-
-    merged, conflicts = _dedupe_merge(seed_draws, latest_draws)
+    # 增量源内部再合并一次（renavon 优先，marksix-rd 补充）
+    merged, conflicts = _dedupe_merge(seed_draws, [])
+    for _name, draws in incremental:
+        merged, conflicts2 = _dedupe_merge(merged, draws)
+        conflicts.extend(conflicts2)
 
     valid, skipped = [], []
     for d in merged:
@@ -161,7 +245,8 @@ def fetch_real_data():
 
     stats = {
         "seed_count": len(seed_draws),
-        "latest_count": len(latest_draws),
+        "source_counts": {name: len(draws) for name, draws in incremental},
+        "source_errors": [{"source": n, "error": e} for n, e in errors],
         "merged_count": len(merged),
         "valid_count": len(valid),
         "conflict_count": len(conflicts),
@@ -196,14 +281,21 @@ def import_all(clear=True):
 
 def sync_latest():
     """
-    增量同步：仅拉取 marksix-rd 的最新数据，INSERT OR IGNORE 补新期。
-    已存在的期号不会改动，因此旧的（可能经种子修正过的）数据不会被覆盖。
+    增量同步：拉取两个增量源（Renavon 优先、marksix-rd 兜底），
+    INSERT OR IGNORE 补新期。已存在的期号不会改动，
+    因此旧的（可能经种子修正过的）数据不会被覆盖。
     """
-    latest_raw = _fetch_json(LATEST_URL)
-    draws = _normalize_marksix_rd(latest_raw)
+    incremental, errors = _fetch_optional_sources()
+    if not incremental:
+        raise RuntimeError("所有增量源均不可用：" + "；".join(
+            f"{n}: {e}" for n, e in errors))
+
+    merged, _conflicts = _dedupe_merge([], [])
+    for _name, draws in incremental:
+        merged, _ = _dedupe_merge(merged, draws)
 
     valid, skipped = [], []
-    for d in draws:
+    for d in merged:
         reason = _validate(d)
         (skipped.append({"period": d["period"], "reason": reason}) if reason
          else valid.append(d))
@@ -216,6 +308,8 @@ def sync_latest():
         "ok": True,
         "inserted": inserted,
         "source_count": len(valid),
+        "source_counts": {name: len(draws) for name, draws in incremental},
+        "source_errors": [{"source": n, "error": e} for n, e in errors],
         "new_periods": new_periods,
         "total_periods": get_results_count(),
     }
@@ -232,7 +326,8 @@ def data_status():
         "latest_date": latest["draw_date"] if latest else None,
         "sources": {
             "seed": SEED_URL,
-            "latest": LATEST_URL,
+            "latest": RENAVON_URL,
+            "fallback": LATEST_URL,
         },
     }
 

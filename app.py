@@ -113,9 +113,9 @@ def api_data_status():
 @app.route("/api/data/import", methods=["POST"])
 def api_data_import():
     """
-    全量导入真实历史数据（1993 年至今，双源合并去重）。
+    全量导入真实历史数据（1993 年至今，多源合并去重）。
     默认清空现有数据（用于替换模拟数据）；clear=false 时仅追加不存在的期号。
-    注意：涉及两个外部抓取 + 批量写库，响应需数秒。
+    注意：涉及多个外部抓取 + 批量写库，响应需数秒。
     """
     body = request.get_json(silent=True) or {}
     clear = body.get("clear", True)
@@ -125,16 +125,16 @@ def api_data_import():
     except Exception as e:
         return jsonify({
             "error": f"导入失败：{e}",
-            "hint": "请检查网络能否访问 raw.githubusercontent.com（国内一般可直连，"
-                    "若失败可稍后重试或配置代理后重试）"
+            "hint": "请检查网络能否访问 raw.githubusercontent.com 与 renavon.com"
+                    "（国内一般可直连，若失败可稍后重试或配置代理后重试）"
         }), 502
 
 
 @app.route("/api/data/sync", methods=["POST"])
 def api_data_sync():
     """
-    增量同步最新开奖（仅拉增量源，INSERT OR IGNORE 补新期号）。
-    开奖一般在周二/四/六晚，开奖后增量源 CI 需要一段时间才更新。
+    增量同步最新开奖（拉增量源，INSERT OR IGNORE 补新期号）。
+    开奖一般在周二/四/六晚，Renavon 源一般当晚更新，marksix-rd 源滞后数小时。
     """
     try:
         return jsonify(sync_latest())
