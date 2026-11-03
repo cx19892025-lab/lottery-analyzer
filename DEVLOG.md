@@ -744,6 +744,91 @@ decoder.decode_elements(selections)
 
 ---
 
+### V1.5 — 打包为 Windows 可执行程序（可分享给他人） (2026-11-03 22:00)
+- **负责智能体**：DeepSeek
+- **工作分支**：feature/deepseek/windows-exe-packaging
+- **起因（用户需求）**：「能不能变成 .exe，不然怎么分享给别人」
+- **交付形态**：**文件夹版（onedir）**，不是单文件。
+  - 理由：启动快（约 2 秒 vs 单文件 5~15 秒）、杀软误报明显更少。
+  - 产物：`dist/六合彩分析工具/`（102 MB）+ `dist/六合彩分析工具.zip`（51 MB）
+  - 对方解压后双击 `六合彩分析工具.exe`，自动起服务并打开浏览器。
+
+- **核心技术问题：exe 目录只读**
+  - 打包后程序所在目录不可写，而数据库与 `settings.json` 必须可写
+    （用户要「同步最新数据」、要改 API Key）。
+  - 新增 `paths.py` 统一解析两类路径：
+    - `resource_path()` → 只读资源（templates / static / 包内初始数据）
+    - `user_data_path()` → 可写数据（`%APPDATA%\LotteryAnalyzer`）
+    - `exe_dir()` → exe 同级目录（放"给用户看的" data/）
+  - **源码运行时两者都指向项目目录**，开发习惯不受影响（实测确认）。
+  - 首次运行 `ensure_user_data()` 把初始数据复制到用户目录；
+    seed 查找顺序：**exe 同级 data/ 优先**，包内次之——
+    这样用户可以直接编辑 exe 旁边那份配置。
+
+- **改动文件**：
+  - `paths.py`（新增）：路径解析 + 首次运行数据播种
+  - `build_exe.py`（新增）：打包脚本，`--no-key` 可打安全版
+  - `app.py`：Flask 显式指定 `template_folder`/`static_folder`（打包后必须）；
+    启动块重写——打包时不启用 debug/reloader（reloader 会 fork 成两个进程抢端口），
+    自动延迟 1.5 秒打开浏览器，启动时打印数据目录与播种结果
+  - `database.py` / `settings.py`：路径改走 `paths.py`
+  - `decoder.py`：删除死代码 `MAPPINGS_PATH`（该文件从未存在过）
+  - `templates/index.html` + `main.js` + `style.css`：新增「分享版 Key」提示条
+  - `.gitignore`：补 `data/SHARED_BUILD`、`*.spec`
+
+- **打包体积优化（重要）**：
+  - 首次打包**误用 `--collect-submodules=pandas/numpy`**，把
+    `pandas.tests.*` 上千个测试模块拖进来；本机又装了 torch / transformers /
+    playwright，PyInstaller 顺着依赖图全打了进去，构建卡在 20 万行日志。
+  - 修正：去掉 `--collect-submodules`，改为显式 `--exclude-module` 排除
+    torch / transformers / playwright / scipy / matplotlib / bokeh / panel /
+    openpyxl / lxml / PIL / numpy.tests / pandas.tests 等。
+  - 结果：构建时间 74 秒，体积 **102 MB**（未优化前会到 GB 级）。
+  - **验证过排除是安全的**：用 `builtins.__import__` 钩子模拟"这些包都不存在"，
+    全部模块仍可导入且 `get_dashboard_data()` 正常。
+
+- **分享版 API Key 的处理（用户明确要求带上）**：
+  - 用户要求预置自己的 Key，让收到的人开箱即用识图；已知悉风险
+    （对方可明文看到、会消耗分享者额度），并会通过"超额停 Key + 给授权者换新 Key"管控。
+  - 实现：打包时把当前 `data/settings.json` 写入 `dist/.../data/settings.json`，
+    并写一个 `SHARED_BUILD` 标记文件。
+  - 设置页据此显示醒目提示：「当前使用的是分享者提供的 API Key，额度由分享者承担」，
+    **用户保存过一次自己的配置后标记被删除，提示不再出现**。
+  - `build_exe.py --no-key` 可打出不含 Key 的安全版。
+
+- **自测验证（全部在真实 exe 上做，不是源码）**：
+  - **首次运行**（先删干净 `%APPDATA%\LotteryAnalyzer`）：
+    自动生成 `lottery.db` / `settings.json` / `SHARED_BUILD` 三个文件 ✅
+  - **配置传递**：`base_url`、`model`、Key（脱敏显示末 4 位）全部正确带入，
+    `borrowed_key=True` ✅
+  - **10 个端点**全部 HTTP 200；数据 4404 期、最新 2026116 ✅
+  - **前端**（Playwright）：13 张图正常渲染、分享版提示条可见、
+    数据管理卡片显示正确、**控制台零报错** ✅
+  - **使用者换自己的 Key**：保存后 `borrowed_key` 变 `False`，提示条消失 ✅
+  - **点「同步最新数据」**：真实网络请求成功（inserted=0，数据本就是最新）✅
+  - **AI 三阶段测试**：接口连通 ✓ / 文本对话 ✓ / 图片对话 ✓，模型 `qwen3-vl-plus` ✅
+  - **完整交付链路**：把 zip 解压到临时目录再运行，配置与数据均正常 ✅
+  - **源码模式回归**：`py_compile` 与 `node --check` 通过，路径仍指向项目 data/ ✅
+
+- **遗留注意事项 / 给下一位 Agent 的说明**：
+  1. **打包命令就是 `python build_exe.py`**，产物在 `dist/`，已被 gitignore。
+     `dist/`、`build/`、`*.spec` 都不要提交。
+  2. **不要给打包命令加 `--collect-submodules=pandas` / `numpy`**，
+     会把测试套件全拖进来（见上文体积优化）。当前 `build_exe.py` 的排除清单
+     是按本机环境调的，换机器打包前先确认没有新增的大包被误收。
+  3. **`paths.py` 是打包正确性的关键**：新增任何需要读写的文件时，
+     只读资源用 `resource_path()`，可写数据用 `user_data_path()`，
+     不要再用 `os.path.dirname(__file__)`。
+  4. **`recommended.special` 可能为 `None`**（见 V1.4.10），前端已用
+     `renderBallsRow()` 兼容；打包不改变这一点。
+  5. **exe 内嵌了分享者的 API Key**，这是用户明确要求并知情的选择。
+     若日后要公开发布，务必改用 `python build_exe.py --no-key`。
+  6. 杀软误报：本次产物未触发 Defender；若对方反馈"打不开/被删"，
+     优先怀疑杀软隔离，让用户加白名单，而不是怀疑程序本身。
+  7. 端口固定 5000，可用环境变量 `LOTTERY_PORT` 覆盖。
+
+---
+
 ## 四、待开发 (Backlog)
 
 ### P2 — 下一批迭代

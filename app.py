@@ -3,7 +3,13 @@
 提供 Web 界面 + RESTful API
 """
 import base64
+import os
+import sys
+import threading
+import webbrowser
+
 from flask import Flask, render_template, jsonify, request
+from paths import resource_path, is_frozen, user_data_dir, ensure_user_data
 from database import init_db, get_all_results
 from analyzer import (
     frequency_analysis, hot_cold_numbers, missing_values,
@@ -17,7 +23,13 @@ from vision import analyze_image, map_vision_to_decoder_selections
 from crawler import import_all, sync_latest, data_status
 import settings as settings_mod
 
-app = Flask(__name__)
+# 打包成 exe 后，模板与静态文件在 PyInstaller 的解压目录里，
+# 必须显式告诉 Flask 去哪里找，否则打包后首页 500。
+app = Flask(
+    __name__,
+    template_folder=resource_path("templates"),
+    static_folder=resource_path("static"),
+)
 # 保持字典插入顺序：生肖等分布数据依赖固定顺序（鼠牛虎兔…），
 # Flask 默认会按字母重排 JSON key，导致图表横轴乱序
 app.json.sort_keys = False
@@ -456,13 +468,62 @@ def api_settings_test():
 
 # ==================== 启动 ====================
 
-if __name__ == "__main__":
-    import sys, io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+HOST = "127.0.0.1"
+PORT = int(os.environ.get("LOTTERY_PORT", "5000"))
 
-    print("[INFO] Lottery Analyzer starting...")
+
+def _open_browser_later(url, delay=1.5):
+    """延迟打开浏览器：等 Flask 真正开始监听，否则会打开一个连接失败的页面"""
+    def _open():
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass  # 打不开浏览器不影响服务本身，用户可以手动访问
+    threading.Timer(delay, _open).start()
+
+
+def main():
+    """
+    启动入口。
+
+    打包成 exe 后：不开 debug（reloader 会把进程 fork 成两份，导致端口冲突），
+    自动打开浏览器，并在控制台打印数据目录，方便用户找到自己的库和配置。
+    """
+    if sys.stdout is not None and hasattr(sys.stdout, "buffer"):
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
     init_db()
-    # 不再自动生成模拟数据：真实数据请到「设置 → 数据管理」一键导入
-    print("[INFO] Server ready: http://localhost:5000")
-    app.run(debug=True, port=5000)
+    url = f"http://{HOST}:{PORT}"
+
+    print("=" * 58)
+    print("  六合彩数据分析工具")
+    print("=" * 58)
+    print(f"  界面地址：{url}")
+    print(f"  数据目录：{user_data_dir()}")
+    if is_frozen():
+        print("  （数据库与 API 配置都保存在上面的目录里）")
+        # 首次运行会把包内的初始数据复制过来，打印结果便于排错
+        seeded = ensure_user_data("lottery.db", "settings.json", "SHARED_BUILD")
+        for name, state in seeded.items():
+            if state == "copied":
+                print(f"    · 已初始化 {name}")
+            elif state == "missing":
+                print(f"    · [警告] 未找到初始 {name}")
+            elif not state.startswith("exists"):
+                print(f"    · [警告] {name}: {state}")
+    print()
+    print("  关闭本窗口即可退出程序。")
+    print("=" * 58)
+
+    if is_frozen():
+        _open_browser_later(url)
+        app.run(host=HOST, port=PORT, debug=False, use_reloader=False)
+    else:
+        # 源码运行保持 debug，便于开发
+        app.run(host=HOST, port=PORT, debug=True)
+
+
+if __name__ == "__main__":
+    main()
