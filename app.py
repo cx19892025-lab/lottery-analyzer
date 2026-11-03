@@ -471,25 +471,59 @@ def api_settings_test():
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("LOTTERY_PORT", "5000"))
 
+# 打包后隐藏控制台：所有 print 落到日志文件，出问题时可回查
+_LOG_FILE = None
 
-def _open_browser_later(url, delay=1.5):
-    """延迟打开浏览器：等 Flask 真正开始监听，否则会打开一个连接失败的页面"""
-    def _open():
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass  # 打不开浏览器不影响服务本身，用户可以手动访问
-    threading.Timer(delay, _open).start()
+
+def _setup_logging():
+    """
+    打包运行时把 stdout/stderr 重定向到日志文件。
+
+    打包版用 --windowed 启动（无控制台），此时 sys.stdout 可能是 None，
+    直接 print 会抛异常导致程序静默退出。这里统一兜住。
+    日志位置：用户数据目录/startup.log
+    """
+    global _LOG_FILE
+    try:
+        log_path = os.path.join(user_data_dir(), "startup.log")
+        os.makedirs(user_data_dir(), exist_ok=True)
+        # 每次启动覆盖，避免无限增长
+        _LOG_FILE = open(log_path, "w", encoding="utf-8", errors="replace")
+        sys.stdout = _LOG_FILE
+        sys.stderr = _LOG_FILE
+    except Exception:
+        # 日志写不了也不能让程序起不来
+        if sys.stdout is None:
+            import io
+            sys.stdout = io.StringIO()
+        if sys.stderr is None:
+            sys.stderr = io.StringIO()
+
+
+def _shutdown(server=None):
+    """关窗即退出：直接终止进程，避免 Flask 线程残留导致端口占用"""
+    try:
+        if _LOG_FILE:
+            _LOG_FILE.flush()
+    except Exception:
+        pass
+    os._exit(0)
 
 
 def main():
     """
     启动入口。
 
-    打包成 exe 后：不开 debug（reloader 会把进程 fork 成两份，导致端口冲突），
-    自动打开浏览器，并在控制台打印数据目录，方便用户找到自己的库和配置。
+    打包成 exe 后：
+      - 不开 debug（reloader 会把进程 fork 成两份，导致端口冲突）
+      - 用 Edge/Chrome 的 --app 模式开**独立窗口**，没有地址栏与标签页
+      - 关掉窗口即退出整个程序
+      - 找不到浏览器时回退到系统默认浏览器，功能不受影响
     """
-    if sys.stdout is not None and hasattr(sys.stdout, "buffer"):
+    frozen = is_frozen()
+    if frozen:
+        _setup_logging()
+    elif sys.stdout is not None and hasattr(sys.stdout, "buffer"):
         import io
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
@@ -502,9 +536,8 @@ def main():
     print("=" * 58)
     print(f"  界面地址：{url}")
     print(f"  数据目录：{user_data_dir()}")
-    if is_frozen():
+    if frozen:
         print("  （数据库与 API 配置都保存在上面的目录里）")
-        # 首次运行会把包内的初始数据复制过来，打印结果便于排错
         seeded = ensure_user_data("lottery.db", "settings.json", "SHARED_BUILD")
         for name, state in seeded.items():
             if state == "copied":
@@ -513,12 +546,33 @@ def main():
                 print(f"    · [警告] 未找到初始 {name}")
             elif not state.startswith("exists"):
                 print(f"    · [警告] {name}: {state}")
-    print()
-    print("  关闭本窗口即可退出程序。")
     print("=" * 58)
+    sys.stdout.flush()
 
-    if is_frozen():
-        _open_browser_later(url)
+    if frozen:
+        # 后台线程：等服务就绪 → 开独立窗口 → 窗口关闭则退出程序
+        def _launch():
+            import window
+            if not window.wait_for_server(url):
+                window._show_error_dialog(
+                    f"服务启动超时，未能监听 {url}。\n"
+                    f"可能端口被占用。\n\n日志：{os.path.join(user_data_dir(), 'startup.log')}"
+                )
+                _shutdown()
+            ok, info = window.launch_window(url, on_close=_shutdown)
+            if not ok:
+                # 没有 Edge/Chrome：回退到默认浏览器，功能不受影响
+                print(f"[回退] {info}，改用系统默认浏览器打开")
+                sys.stdout.flush()
+                try:
+                    webbrowser.open(url)
+                except Exception as e:
+                    window._show_error_dialog(
+                        f"未能打开界面窗口：{info}\n\n"
+                        f"请手动在浏览器访问：{url}"
+                    )
+
+        threading.Thread(target=_launch, daemon=True).start()
         app.run(host=HOST, port=PORT, debug=False, use_reloader=False)
     else:
         # 源码运行保持 debug，便于开发
