@@ -4,7 +4,7 @@
 """
 import base64
 from flask import Flask, render_template, jsonify, request
-from database import init_db, generate_simulated_data, get_all_results
+from database import init_db, get_all_results
 from analyzer import (
     frequency_analysis, hot_cold_numbers, missing_values,
     odd_even_analysis, big_small_analysis, sum_analysis,
@@ -14,6 +14,7 @@ from analyzer import (
 from backtest import run_backtest, STRATEGIES, MIN_HISTORY
 from decoder import get_all_categories, decode_elements, quick_decode
 from vision import analyze_image, map_vision_to_decoder_selections
+from crawler import import_all, sync_latest, data_status
 import settings as settings_mod
 
 app = Flask(__name__)
@@ -31,8 +32,13 @@ def index():
 
 @app.route("/api/dashboard")
 def api_dashboard():
-    """仪表盘汇总数据"""
-    return jsonify(get_dashboard_data())
+    """
+    仪表盘汇总数据
+    window: 统计窗口（最近 N 期），默认 500；0 表示全量。
+            真实数据 4400+ 期，全量统计慢且远期参考价值低。
+    """
+    window = request.args.get("window", 500, type=int)
+    return jsonify(get_dashboard_data(window=window or None))
 
 
 @app.route("/api/history")
@@ -91,6 +97,46 @@ def api_tail():
 def api_consecutive():
     """连号分析"""
     return jsonify(consecutive_analysis())
+
+
+# ==================== 数据管理 API ====================
+
+@app.route("/api/data/status")
+def api_data_status():
+    """本地开奖库概况（期数、最新期号/日期、数据源地址）"""
+    return jsonify(data_status())
+
+
+@app.route("/api/data/import", methods=["POST"])
+def api_data_import():
+    """
+    全量导入真实历史数据（1993 年至今，双源合并去重）。
+    默认清空现有数据（用于替换模拟数据）；clear=false 时仅追加不存在的期号。
+    注意：涉及两个外部抓取 + 批量写库，响应需数秒。
+    """
+    body = request.get_json(silent=True) or {}
+    clear = body.get("clear", True)
+    try:
+        result = import_all(clear=bool(clear))
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({
+            "error": f"导入失败：{e}",
+            "hint": "请检查网络能否访问 raw.githubusercontent.com（国内一般可直连，"
+                    "若失败可稍后重试或配置代理后重试）"
+        }), 502
+
+
+@app.route("/api/data/sync", methods=["POST"])
+def api_data_sync():
+    """
+    增量同步最新开奖（仅拉增量源，INSERT OR IGNORE 补新期号）。
+    开奖一般在周二/四/六晚，开奖后增量源 CI 需要一段时间才更新。
+    """
+    try:
+        return jsonify(sync_latest())
+    except Exception as e:
+        return jsonify({"error": f"同步失败：{e}"}), 502
 
 
 # ==================== 智能选号 API ====================
@@ -405,6 +451,6 @@ if __name__ == "__main__":
 
     print("[INFO] Lottery Analyzer starting...")
     init_db()
-    generate_simulated_data()
+    # 不再自动生成模拟数据：真实数据请到「设置 → 数据管理」一键导入
     print("[INFO] Server ready: http://localhost:5000")
     app.run(debug=True, port=5000)

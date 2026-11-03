@@ -39,7 +39,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
         if (btn.dataset.tab === "history") loadHistory();
         if (btn.dataset.tab === "decoder") loadDecoderCategories();
         if (btn.dataset.tab === "backtest") loadBacktestTab();
-        if (btn.dataset.tab === "settings") loadSettings();
+        if (btn.dataset.tab === "settings") { loadSettings(); loadDataStatus(); }
     });
 });
 
@@ -47,15 +47,19 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 document.addEventListener("DOMContentLoaded", () => {
     loadDashboard();
     refreshAiStatus();   // 启动即探测 AI 是否已配置，用于图猜码页的降级提示
+    loadDataStatus();    // 设置页数据管理区块的状态（惰性显示，切换到设置页时也会刷新）
 });
 
 // ==================== 仪表盘 ====================
 async function loadDashboard() {
     try {
-        const res = await fetch("/api/dashboard");
+        const win = document.getElementById("windowSelect").value;
+        const res = await fetch(`/api/dashboard?window=${win}`);
         dashboardData = await res.json();
 
-        document.getElementById("dataInfo").textContent = `已加载 ${dashboardData.total_periods} 期数据`;
+        const winText = dashboardData.window ? `近${dashboardData.window}期` : "全部数据";
+        document.getElementById("dataInfo").textContent =
+            `已加载 ${dashboardData.total_periods} 期数据，当前统计：${winText}`;
         document.getElementById("dashboardLoading").style.display = "none";
         document.getElementById("dashboardContent").style.display = "block";
 
@@ -1405,3 +1409,91 @@ document.addEventListener("keydown", e => {
         quickDecode();
     }
 });
+
+
+// ==================== 数据管理（真实开奖数据） ====================
+
+function showDataStatus(kind, html) {
+    const box = document.getElementById("dataStatusResult");
+    const color = kind === "ok" ? "#22c55e" : (kind === "err" ? "#ef4444" : "#f59e0b");
+    const icon = kind === "ok" ? "✅" : (kind === "err" ? "❌" : "ℹ️");
+    box.innerHTML = `<div class="settings-status" style="border-color:${color}; color:${color};">
+        ${icon} ${html}
+    </div>`;
+}
+
+async function loadDataStatus() {
+    const el = document.getElementById("dataStatusText");
+    if (!el) return;
+    try {
+        const res = await fetch("/api/data/status");
+        const d = await res.json();
+        if (!d.total_periods) {
+            el.innerHTML = "⚠️ 本地暂无开奖数据，请先「导入真实历史数据」";
+            el.style.color = "#f59e0b";
+        } else {
+            el.innerHTML = `当前库内 <b>${d.total_periods}</b> 期，最新：第 ${d.latest_period} 期（${d.latest_date}）`;
+            el.style.color = "";
+        }
+    } catch (e) {
+        el.textContent = `读取状态失败：${e.message}`;
+        el.style.color = "#ef4444";
+    }
+}
+
+async function importRealData() {
+    if (!confirm("导入将清空当前全部开奖数据（含模拟数据），并写入 1993 年至今的真实历史开奖，约需数秒。确定继续？")) {
+        return;
+    }
+    const btn = document.getElementById("importDataBtn");
+    btn.disabled = true;
+    showDataStatus("info", "正在抓取并导入真实历史数据，请稍候...");
+    try {
+        const res = await fetch("/api/data/import", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ clear: true }),
+        });
+        const d = await res.json();
+        if (!res.ok) {
+            showDataStatus("err", d.error || "导入失败");
+            return;
+        }
+        const s = d.fetched || {};
+        showDataStatus("ok",
+            `导入完成：新写入 ${d.inserted} 期，库内共 ${d.total_periods} 期` +
+            `（种子源 ${s.seed_count} 期 + 增量源补充，合并去重 ${s.merged_count} 期` +
+            `${s.conflict_count ? `，重叠期号码不一致 ${s.conflict_count} 期已按官方缓存为准` : ""}）` +
+            (s.latest ? `，最新第 ${s.latest.period} 期（${s.latest.draw_date}）` : ""));
+        loadDataStatus();
+        loadDashboard();   // 数据变了，仪表盘直接刷新
+    } catch (e) {
+        showDataStatus("err", `导入失败：${e.message}`);
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function syncLatestData() {
+    const btn = document.getElementById("syncDataBtn");
+    btn.disabled = true;
+    showDataStatus("info", "正在同步最新开奖...");
+    try {
+        const res = await fetch("/api/data/sync", { method: "POST" });
+        const d = await res.json();
+        if (!res.ok) {
+            showDataStatus("err", d.error || "同步失败");
+            return;
+        }
+        showDataStatus("ok",
+            d.inserted > 0
+                ? `同步完成：新增 ${d.inserted} 期（${(d.new_periods || []).join("、")}），库内共 ${d.total_periods} 期`
+                : `已是最新：没有新增期号（数据源暂无新开奖，库内共 ${d.total_periods} 期）`);
+        loadDataStatus();
+        if (d.inserted > 0) loadDashboard();
+    } catch (e) {
+        showDataStatus("err", `同步失败：${e.message}`);
+    } finally {
+        btn.disabled = false;
+    }
+}
