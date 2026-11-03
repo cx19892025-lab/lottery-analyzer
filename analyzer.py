@@ -302,6 +302,50 @@ def main_zodiac_stats(limit=None):
     }
 
 
+def zodiac_hot_cold(limit=None, recent_n=30, top_k=3):
+    """
+    生肖冷热统计。
+
+    重要：生肖表按**农历年**轮换，同一个号码在不同年份属于不同生肖，
+    因此必须用**每期自己的开奖日期**去换算，不能拿今天的表套历史数据。
+
+    返回 {
+      "counts": {生肖: 次数},        # 窗口内各生肖出现次数（正码+特码）
+      "hot": [(生肖, 次数), ...],     # 出现最多的
+      "cold": [(生肖, 次数), ...],    # 出现最少的
+      "window": 实际统计期数,
+      "expected": 每个生肖的理论期望次数,
+    }
+    """
+    results = get_all_results(recent_n if limit is None else min(recent_n, limit))
+    if not results:
+        return {"counts": {}, "hot": [], "cold": [], "window": 0, "expected": 0}
+
+    counts = Counter()
+    for r in results:
+        d = date.fromisoformat(r["draw_date"])
+        for i in range(1, 7):
+            counts[zodiac_of_number(int(r[f"num{i}"]), d)] += 1
+        counts[zodiac_of_number(int(r["special"]), d)] += 1
+
+    # 每期 7 个号码，12 生肖均分
+    expected = round(len(results) * 7 / 12, 2)
+    ranked = sorted(ZODIAC_ORDER, key=lambda a: (-counts.get(a, 0), a))
+    return {
+        "counts": {a: counts.get(a, 0) for a in ZODIAC_ORDER},
+        "hot": [(a, counts.get(a, 0)) for a in ranked[:top_k]],
+        "cold": [(a, counts.get(a, 0)) for a in ranked[-top_k:]][::-1],
+        "window": len(results),
+        "expected": expected,
+    }
+
+
+def _numbers_of_zodiac(animal, d):
+    """某生肖在指定日期生效的号码列表"""
+    from decoder import get_zodiac_map
+    return list(get_zodiac_map(d).get(animal, []))
+
+
 def smart_recommend(strategy="balanced", limit=None, recent_n=30):
     """
     智能选号推荐
@@ -310,6 +354,8 @@ def smart_recommend(strategy="balanced", limit=None, recent_n=30):
       - "cold": 偏向冷号（博冷）
       - "balanced": 热冷均衡
       - "random": 纯随机
+      - "zodiac_hot": 热生肖（近期出现最多的生肖所辖号码）
+      - "zodiac_cold": 冷生肖（近期出现最少的生肖所辖号码）
     limit: 只使用最近 limit 期数据做分析（None = 全部）。
            **回测时必须传入**，否则会看到未来数据，回测结果失真。
     recent_n: 冷热号统计窗口
@@ -324,6 +370,59 @@ def smart_recommend(strategy="balanced", limit=None, recent_n=30):
             "special": all_nums[6],
             "strategy": "纯随机选号",
             "reason": "完全随机，每个号码概率相等"
+        }
+
+    # 生肖策略：先看历史里哪个生肖最热/最冷，再从该生肖的号码池里选
+    if strategy in ("zodiac_hot", "zodiac_cold"):
+        zc = zodiac_hot_cold(limit=limit, recent_n=recent_n, top_k=3)
+        if not zc["hot"]:
+            # 历史不足，退化为纯随机，保证回测不中断
+            all_nums = rnd.sample(range(1, 50), 7)
+            return {
+                "main": sorted(all_nums[:6]),
+                "special": all_nums[6],
+                "strategy": "生肖策略（数据不足，退化为随机）",
+                "reason": "历史样本不足，无法统计生肖冷热"
+            }
+
+        # 取最热/最冷的 2 个生肖，合并其号码池
+        picked = zc["hot"] if strategy == "zodiac_hot" else zc["cold"]
+        animals = [a for a, _ in picked[:2]]
+
+        # 生肖表按农历年轮换：用**历史窗口内最新一期**的开奖日期取表。
+        #
+        # 注意两点：
+        #  1. 不要用 get_all_results(1)：那返回的是**全库最新**一期，
+        #     回测时属于"未来数据"，会造成泄露。
+        #  2. get_all_results 是 ORDER BY period DESC（新的在前），
+        #     所以窗口内最新一期是 hist[0]，不是 hist[-1]。
+        hist = get_all_results(limit)
+        ref_date = date.fromisoformat(hist[0]["draw_date"]) if hist else date.today()
+
+        pool = []
+        for a in animals:
+            for n in _numbers_of_zodiac(a, ref_date):
+                if n not in pool:
+                    pool.append(n)
+
+        if len(pool) < 7:
+            # 生肖号码池不足 7 个（正常情况 4~5 个/生肖，两个生肖约 8~10 个）
+            extra = [n for n in range(1, 50) if n not in pool]
+            rnd.shuffle(extra)
+            pool += extra[: 7 - len(pool)]
+
+        selected = rnd.sample(pool, min(7, len(pool)))
+        while len(selected) < 7:
+            extra = rnd.choice([n for n in range(1, 50) if n not in selected])
+            selected.append(extra)
+
+        label = "热生肖" if strategy == "zodiac_hot" else "冷生肖"
+        detail = "、".join(f"{a}({c}次)" for a, c in picked[:2])
+        return {
+            "main": sorted(selected[:6]),
+            "special": selected[6],
+            "strategy": f"{label}优先",
+            "reason": f"近{recent_n}期{label}：{detail}，从这些生肖的号码中选取"
         }
 
     freq = frequency_analysis(limit)

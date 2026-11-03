@@ -100,21 +100,61 @@ def clear_results():
 # 重复查 SQLite 是最大开销。写操作统一走 _invalidate_cache()。
 _result_cache = []
 
+# 回测用的"历史截止期号"。
+#
+# 背景：analyzer 里十几个统计函数都直接调 get_all_results(limit)，
+# 而 limit 的语义是"全库最新的 N 期"。回测时这会把未来数据喂给策略
+# （例如预测 1994 年那一期时取到 2025 年的数据），造成严重泄露。
+#
+# 与其给每个统计函数加一个 before_period 参数（容易漏改），
+# 这里用一个进程内的截止期号：回测循环在每期开始前设置它，
+# get_all_results 统一遵守。这样 analyzer 无需任何改动。
+_history_cutoff = None
+
+
+def set_history_cutoff(period):
+    """
+    设置历史截止期号：之后 get_all_results 只返回期号 < period 的记录。
+    period=None 表示取消限制（恢复正常全库读取）。
+    """
+    global _history_cutoff
+    _history_cutoff = period
+
+
+def get_history_cutoff():
+    return _history_cutoff
+
 
 def _invalidate_cache():
     global _result_cache
     _result_cache = []
 
 
-def get_all_results(limit=None):
-    """获取所有开奖记录，按期号降序（带内存缓存，写操作自动失效）"""
+def get_all_results(limit=None, before_period=None):
+    """
+    获取开奖记录，按期号降序（带内存缓存，写操作自动失效）。
+
+    limit: 只取最新的 N 期（在已应用的历史截止期号之内）。
+    before_period: 只取期号严格小于该值的记录（显式指定，优先级高于全局截止）。
+
+    回测防泄露：由 set_history_cutoff() 设置的截止期号会自动生效，
+    analyzer 里的统计函数无需感知。
+    """
     global _result_cache
     if not _result_cache:
         conn = get_connection()
         _result_cache = [dict(r) for r in conn.execute(
             "SELECT * FROM lottery_results ORDER BY period DESC").fetchall()]
         conn.close()
-    return _result_cache[:limit] if limit else _result_cache
+
+    rows = _result_cache
+
+    # 显式参数优先，其次用全局截止（回测时设置）
+    cutoff = before_period if before_period is not None else _history_cutoff
+    if cutoff is not None:
+        rows = [r for r in rows if r["period"] < cutoff]
+
+    return rows[:limit] if limit else rows
 
 
 def get_results_count():

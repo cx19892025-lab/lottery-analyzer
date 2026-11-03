@@ -771,6 +771,8 @@ const STRATEGY_COLORS = {
     hot: "#ef4444",
     cold: "#3b82f6",
     random: "#a855f7",
+    zodiac_hot: "#f59e0b",
+    zodiac_cold: "#14b8a6",
 };
 
 function loadBacktestTab() {
