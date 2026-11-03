@@ -1660,9 +1660,12 @@ async function syncLatestData() {
             return;
         }
         showDataStatus("ok",
-            d.inserted > 0
+            (d.inserted > 0
                 ? `同步完成：新增 ${d.inserted} 期（${(d.new_periods || []).join("、")}），库内共 ${d.total_periods} 期`
-                : `已是最新：没有新增期号（数据源暂无新开奖，库内共 ${d.total_periods} 期）`);
+                : `已是最新：没有新增期号（数据源暂无新开奖，库内共 ${d.total_periods} 期）`)
+            + ((d.source_errors || []).length
+                ? `　⚠️ 部分数据源不可用：${d.source_errors.map(e => e.source).join("、")}`
+                : ""));
         loadDataStatus();
         if (d.inserted > 0) loadDashboard();
     } catch (e) {

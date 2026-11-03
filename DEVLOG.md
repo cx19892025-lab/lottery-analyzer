@@ -406,10 +406,12 @@ decoder.decode_elements(selections)
   - **前端实测**（Playwright）：窗口切换刷新正常、数据管理卡片显示正确、1600/390px 无横向溢出、控制台零报错 ✅
 - **关键发现（重要，给下一位 Agent）**：
   1. **增量源 CI 目前是坏的**：marksix-rd 仓库的 `ingest-hkjc-daily` Actions 自 2026-10-29 起连续 failure——但失败的只是最后「Commit snapshots」步骤（git 提交，疑似仓库 Workflow permissions 设为只读），**「Fetch official candidates + parse」一直是 success**，即 HKJC 抓取链路仍正常。因此当前数据停在 2026-10-03（今天 2026-11-03，滞后约 1 个月）。恢复方案：用户 fork 该仓库 → Settings → Actions → Workflow permissions 改为 "Read and write" → 手动触发 workflow_dispatch 即可恢复每日同步；届时本项目无需改代码，`sync_latest()` 拉的就是自己 fork 的地址（改 `crawler.LATEST_URL` 指向 fork）。
+     > **已由 V1.4.4 解决**：不再依赖该仓库，改用 Renavon CSV 作首选增量源（marksix-rd 退为兜底）。上文的 fork 方案**无需执行**。
   2. **生肖映射是静态表（已知大坑，下版本处理）**：真实六合彩每年生肖↔号码对应随农历年变化，`decoder.py` 目前是静态映射，接入真实数据后「图猜码」的生肖推导会失准。五行/色波/方位映射不受影响。建议下版本做「按开奖年份的动态生肖表」（每年以冬至/立春为界有不同派别，需先与用户确认口径）。
   3. `get_all_results()` 现在返回**缓存列表的切片/引用**，调用方不得原地修改返回的 dict，否则会污染缓存（当前所有调用方均只读）。
   4. 回测耗时随库内期数增长（每期分析要扫全部历史），200 期 14.6s 可接受；若用户跑全量 4300+ 期回测预计需数分钟，属预期行为。
   5. 特码与正码可能同号在模拟数据中出现过，真实数据中七球互异——校验规则以此为准，若未来数据源违反该规则会被跳过并报告。
+  6. **数据源现状（V1.4.4 后）**：`crawler.py` 三源 —— 种子 `icelam`（全量历史）+ 增量首选 `renavon`（每期开奖后更新）+ 增量兜底 `marksix-rd`（CI 坏了，仅作冗余）。新增/改动数据源时记得同步更新本条与 `data_status()` 的 `sources` 字段。
 
 ### V1.4.1 — 修复生肖映射（静态表→按农历年动态表） (2026-11-03 11:30)
 - **负责智能体**：DeepSeek
@@ -468,12 +470,34 @@ decoder.decode_elements(selections)
   - `/api/decoder/vision` 全链路返回候选 37 个号码、推荐 `main=[2,18,19,24,34,35] special=40` ✅
   - `/api/settings/test` 三阶段全绿（模型列表 42 个命中 ✓ / 文本对话 ✓ / 图片对话 ✓）✅
 
+### V1.4.4 — 恢复开奖数据增量同步（新增 Renavon 源） (2026-11-03 15:20)
+- **负责智能体**：GLM
+- **问题**：`marksix-rd` 增量源自 2026-10-29 起 CI 失败，数据停在 2026-10-03，库内比实际落后约一个月。
+- **解决**：实测发现 **Renavon 的 CSV 导出可直连**（`https://renavon.com/data/hkjc/hkjc_marksix_results/download/csv`），覆盖 1993-01 ~ 至今、每期开奖后更新，成为**首选增量源**。
+  - 三个坑：① 需要**浏览器 UA**（默认 UA 返回 403）；② 响应体是 gzip 但**未声明 `Content-Encoding`**，须按魔数 `1f 8b` 自行解压；③ 文件带 **UTF-8 BOM**，须用 `utf-8-sig` 解码，否则首列名变成 `﻿draw_record_id`。
+- **实现**（`crawler.py`）：
+  - 新增 `_fetch_renavon_csv()`（浏览器 UA + gzip 自解 + BOM 处理）与 `_normalize_renavon()`（CSV → 统一结构，期号由 `draw_year` + `draw_number_in_year` 拼成 `YYYYSSS`）。
+  - 新增 `_fetch_optional_sources()`：两个增量源**独立降级**，任一失败不影响另一个，错误写入 `stats.source_errors` 而非中断导入。
+  - `fetch_real_data()` / `sync_latest()` 改为多源合并；`sync_latest()` 在所有增量源都不可用时抛出带各源错误明细的 `RuntimeError`。
+  - `data_status()` 的 `sources` 字段改为 `seed` / `latest`（Renavon）/ `fallback`（marksix-rd）。
+  - 前端同步结果提示追加「部分数据源不可用」警告。
+- **数据校验**：
+  - Renavon 与库内 **4393 期重叠部分：号码零冲突、日期零差异** ✅
+  - 与 Renavon 原始 CSV **全量 4404 期逐期比对：零不一致** ✅
+  - 期号唯一、降序有序、七号互异且均在 1-49、正码升序存储 ✅
+  - 新增的 11 期（2026106 ~ 2026116）开奖日期全部落在周二/四/六 ✅
+  - 全量导入路径：4404 期、`conflict_count=0`、`skipped=0` ✅
+  - 降级路径（模拟 renavon 抛错）：marksix-rd 仍供数，导入不中断，`source_errors` 正确上报；两源全挂时给出明确错误 ✅
+  - 19 个 API 端点全部 200 ✅
+- **库内现状**：**4404 期（1993-01-05 ~ 2026-10-31）**
+- **注意**：香港赛马会偶尔有非周二/四/六的特殊开期（如 2026-02-15、2026-05-10、2026-06-14、2026-06-28、2026-07-05），属正常现象，不是数据错误。
+
 ---
 
 ## 四、待开发 (Backlog)
 
 ### P2 — 下一批迭代
-- [x] **真实历史数据爬虫**：双源接入 1993 年至今 4393 期官方开奖，替换模拟数据（V1.4 完成；增量恢复方案见 V1.4 遗留事项 1）
+- [x] **真实历史数据爬虫**：三源接入 1993 年至今 4404 期官方开奖，替换模拟数据（V1.4 完成；增量源 V1.4.4 改为 Renavon 首选 + marksix-rd 兜底）
 - [x] **动态生肖映射表**：按农历年份的生肖↔号码对应（V1.4.1 完成，口径：当年生肖=1，农历正月初一换表）
 - [x] **历史命中率回测**：各策略的历史"命中"表现统计（V1.2 完成）
 - [x] **AI 解读玄机图**：AI 识别图片元素→映射→出号（V1.1 实现，V1.3 改为用户自配置接口；原"AI 生成每日玄机图"需求由用户确认为解读方向，不再做生图）
