@@ -112,13 +112,49 @@ def analyze_image(image_data_b64: str, mime_type: str = "image/png") -> dict:
             max_tokens=max_tokens,
         )
 
-        msg = response.choices[0].message
+        choice = response.choices[0]
+        msg = choice.message
         raw_content = msg.content or ""
-        # 部分模型（推理型）在 max_tokens 偏小时会把输出全放进 reasoning_content，
-        # 此时 content 为空串，回退去读 reasoning_content
+        finish = getattr(choice, "finish_reason", "") or ""
+
+        # 推理型模型（如 DeepSeek）会先输出一大段思考过程（reasoning_content）。
+        # 若 max_tokens 偏小，思考就把预算吃光，content 为空且 finish_reason='length'。
+        # 此时**不能**拿 reasoning_content 当结果——那是自然语言思考过程，
+        # 正则会从中误匹配出 JSON 片段、json.loads 解析成 list，导致上层崩溃。
+        # 正确做法是加大 max_tokens 重试。
+        if not raw_content.strip() and finish == "length":
+            retry_tokens = max(max_tokens * 4, 4096)
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=retry_tokens,
+            )
+            choice = response.choices[0]
+            raw_content = choice.message.content or ""
+
+        # 重试后仍无内容：明确报错，别让前端只看到"未识别到明显元素"
         if not raw_content.strip():
-            raw_content = getattr(msg, "reasoning_content", "") or ""
-        return _parse_json_response(raw_content)
+            return {
+                **empty,
+                "error": ("模型返回了空内容（推理型模型的思考过程可能占满了输出预算）。"
+                          "请重试，或改用非推理型视觉模型如 qwen3-vl-plus。"),
+                "description": "AI 未返回可解析的结果",
+            }
+
+        parsed = _parse_json_response(raw_content)
+
+        # 模型没按 JSON 格式回答（如 DeepSeek 有时输出散文），别让前端只显示
+        # "未识别到明显元素" 而看不到原因
+        if parsed.get("parse_failed"):
+            return {
+                **empty,
+                "error": ("模型没有按要求的 JSON 格式返回结果，无法解析。"
+                          "请重试，或改用 qwen3-vl-plus 等格式更稳定的视觉模型。"),
+                "description": "AI 返回格式无法解析",
+                "raw_response": parsed.get("raw_response", "")[:500],
+            }
+
+        return parsed
 
     except Exception as e:
         return {
@@ -172,23 +208,40 @@ def _friendly_error(e) -> str:
 
 
 def _parse_json_response(raw_text: str) -> dict:
-    """从 AI 回复中提取 JSON"""
+    """从 AI 回复中提取 JSON。始终返回 dict，绝不返回 list/None。"""
     # 移除 markdown code block
     cleaned = re.sub(r'```json\s*', '', raw_text)
     cleaned = re.sub(r'```\s*', '', cleaned)
     cleaned = cleaned.strip()
 
+    def _coerce(obj):
+        """AI 可能返回 JSON 数组或标量，统一收敛成 dict"""
+        if isinstance(obj, dict):
+            return obj
+        if isinstance(obj, list):
+            # 取第一个 dict 元素；数组本身当作 objects 列表
+            for item in obj:
+                if isinstance(item, dict):
+                    return item
+            return {"objects": [str(x) for x in obj]}
+        return None
+
     try:
-        result = json.loads(cleaned)
-        return result
+        coerced = _coerce(json.loads(cleaned))
+        if coerced is not None:
+            return coerced
     except json.JSONDecodeError:
-        # 尝试在文本中找 JSON
-        match = re.search(r'\{[\s\S]*\}', raw_text)
-        if match:
-            try:
-                return json.loads(match.group())
-            except json.JSONDecodeError:
-                pass
+        pass
+
+    # 尝试在文本中找 JSON
+    match = re.search(r'\{[\s\S]*\}', raw_text)
+    if match:
+        try:
+            coerced = _coerce(json.loads(match.group()))
+            if coerced is not None:
+                return coerced
+        except json.JSONDecodeError:
+            pass
 
     # 解析失败，返回原文作为描述
     return {
@@ -196,7 +249,8 @@ def _parse_json_response(raw_text: str) -> dict:
         "elements": [], "directions": [],
         "numbers": [], "objects": [],
         "description": raw_text[:200],
-        "raw_response": raw_text
+        "raw_response": raw_text,
+        "parse_failed": True,
     }
 
 

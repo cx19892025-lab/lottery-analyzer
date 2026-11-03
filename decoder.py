@@ -254,9 +254,10 @@ def decode_elements(selections):
                 trace.append(f"🔍 关键词【{kw}】→ {mapped} → {nums}")
 
     if not score:
+        # recommended 始终是 dict（main/special），避免调用方拿到 list 而崩
         return {
             "all_candidates": [],
-            "recommended": [],
+            "recommended": {"main": [], "special": None},
             "decode_trace": ["⚠️ 未选择任何解码元素"]
         }
 
