@@ -1411,6 +1411,14 @@ async function doVisionDecode(imageDataUrl, mimeType) {
         if (vision.numbers && vision.numbers.length > 0) {
             detailHtml += `<div class="trace-item">🔢 <strong>数字：</strong>${vision.numbers.map(n => `<span class="vision-tag">${n}</span>`).join("")}</div>`;
         }
+        // characters / counts 是 V1.4.8 新增的两个线索维度：
+        // characters = 图上刻的汉字（石碑「龍」→ 生肖龙），counts = 数量线索（「三盏灯笼」→ 3）
+        if (vision.characters && vision.characters.length > 0) {
+            detailHtml += `<div class="trace-item">✍️ <strong>汉字：</strong>${vision.characters.map(c => `<span class="vision-tag character">${c}</span>`).join("")}</div>`;
+        }
+        if (vision.counts && vision.counts.length > 0) {
+            detailHtml += `<div class="trace-item">🔢 <strong>数量：</strong>${vision.counts.map(c => `<span class="vision-tag count">${c}</span>`).join("")}</div>`;
+        }
 
         detailContent.innerHTML = detailHtml || '<div class="trace-item">未识别到明显元素</div>';
 

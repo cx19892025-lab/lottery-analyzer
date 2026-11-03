@@ -120,10 +120,11 @@ ELEMENT_HINTS = {
 
     # 自然元素 → 五行
     "金属": "金", "刀剑": "金", "铜钱": "金", "金子": "金", "银": "金",
-    "树": "木", "森林": "木", "竹子": "木", "花草": "木", "木头": "木",
-    "水": "水", "河流": "水", "大海": "水", "雨": "水", "湖泊": "水", "瀑布": "水",
+    "树": "木", "森林": "木", "竹子": "木", "竹林": "木", "花草": "木", "木头": "木",
+    "水": "水", "河流": "水", "溪流": "水", "大海": "水", "雨": "水", "湖泊": "水", "瀑布": "水",
     "火": "火", "太阳": "火", "火焰": "火", "蜡烛": "火", "灯笼": "火",
-    "山": "土", "土地": "土", "石头": "土", "城墙": "土", "大地": "土",
+    "山": "土", "土地": "土", "石头": "土", "石碑": "土", "山石": "土",
+    "城墙": "土", "大地": "土",
 
     # 颜色 → 色波
     "红色": "红波", "红": "红波", "朱": "红波", "赤": "红波",
@@ -200,42 +201,55 @@ def decode_elements(selections):
     zmap = get_zodiac_map()          # 当前农历年生效的生肖表
     zinfo = zodiac_info()
 
-    # 1. 处理生肖
-    for z in selections.get("zodiac", []):
-        if z in zmap:
-            nums = zmap[z]
+    # 1~4. 生肖 / 五行 / 色波 / 方位
+    #
+    # 【护栏】同一维度若多个分类的号码并集覆盖全部 1-49，该维度就**被中和**了——
+    # 每个号码都拿到同样的加分，等于没有信息。
+    # 实测踩过三次：
+    #   - 方位集齐东南西北（覆盖 49）→ 方位维度失效
+    #   - 五行同时识别出木火金水土（各 10 个，合计 49）→ 五行维度同样失效
+    #   - 生肖若 12 个全被识别，同样覆盖 49
+    # 所以这里统一检查并集大小，覆盖满 49 就整维丢弃，并在 trace 里说明。
+    def _apply_dimension(dim_name, values, mapping, weight, icon, note="", item_note=""):
+        """按维度给号码加分；若该维度覆盖全部号码则整维作废。返回是否生效。"""
+        hit = [v for v in values if v in mapping]
+        if not hit:
+            return False
+        covered = set()
+        for v in hit:
+            covered.update(mapping[v])
+        if len(covered) >= 49:
+            trace.append(
+                f"{icon} {dim_name}维度覆盖了全部 1-49 个号码，等同没有{dim_name}暗示，已忽略该维度"
+                + (f"（{note}）" if note else "")
+            )
+            return False
+        for v in hit:
+            nums = mapping[v]
             for n in nums:
-                score[n] += 3  # 生肖权重最高
-            trace.append(f"🐾 生肖【{z}】→ 号码 {nums}（{zinfo['lunar_year']} {zinfo['animal']}年表）")
+                score[n] += weight
+            trace.append(f"{icon} {dim_name}【{v}】→ 号码 {nums}"
+                         + (f"（{item_note}）" if item_note else ""))
+        return True
 
-    # 2. 处理五行
-    for w in selections.get("wuxing", []):
-        if w in WUXING_MAP:
-            nums = WUXING_MAP[w]
-            for n in nums:
-                score[n] += 2
-            trace.append(f"☯️ 五行【{w}】→ 号码 {nums}")
-
-    # 3. 处理色波
-    for c in selections.get("color", []):
-        if c in COLOR_MAP:
-            nums = COLOR_MAP[c]
-            for n in nums:
-                score[n] += 2
-            trace.append(f"🎨 色波【{c}】→ 号码 {nums}")
-
-    # 4. 处理方位
-    for d in selections.get("direction", []):
-        if d in DIRECTION_MAP:
-            nums = DIRECTION_MAP[d]
-            for n in nums:
-                score[n] += 1
-            trace.append(f"🧭 方位【{d}】→ 号码 {nums}")
+    _apply_dimension("生肖", selections.get("zodiac", []), zmap, 3, "🐾",
+                     note=f"{zinfo['lunar_year']} {zinfo['animal']}年表",
+                     item_note=f"{zinfo['lunar_year']} {zinfo['animal']}年表")
+    _apply_dimension("五行", selections.get("wuxing", []), WUXING_MAP, 2, "☯️")
+    _apply_dimension("色波", selections.get("color", []), COLOR_MAP, 2, "🎨")
+    _apply_dimension("方位", selections.get("direction", []), DIRECTION_MAP, 1, "🧭")
 
     # 5. 处理关键词（自动映射）
+    #
+    # 用**子串匹配**而非精确匹配：AI 返回的物件名常带修饰词
+    # （「红灯笼」「三只羊」「石碑上的字」），精确匹配几乎全灭。
+    # 一个关键词可能同时命中多个线索（如「红灯笼」→ 灯笼=火、红=红波），全部计入。
     for kw in selections.get("keywords", []):
-        if kw in ELEMENT_HINTS:
-            mapped = ELEMENT_HINTS[kw]
+        matched = [k for k in ELEMENT_HINTS if k in kw]
+        if not matched:
+            continue
+        for key in matched:
+            mapped = ELEMENT_HINTS[key]
             # 判断映射到哪个维度
             if mapped in zmap:
                 nums = zmap[mapped]
@@ -253,12 +267,30 @@ def decode_elements(selections):
                     score[n] += 2
                 trace.append(f"🔍 关键词【{kw}】→ {mapped} → {nums}")
 
+    # 6. 处理图上直接写出的数字（强线索，权重 5）
+    #    「石碑上刻着 8」这类是玄机图里最直接的号码暗示，比生肖/五行更具体。
+    for n in selections.get("numbers", []):
+        if 1 <= n <= 49:
+            score[n] += 5
+            trace.append(f"🔢 图上数字【{n}】→ 号码 {n}（直接暗示，权重 +5）")
+
+    # 7. 处理数量推出的数字（弱线索，权重 2）
+    #    「三盏灯笼」→ 3，间接但仍是线索。
+    for n in selections.get("count_numbers", []):
+        if 1 <= n <= 49:
+            score[n] += 2
+            trace.append(f"🔢 数量线索【{n}】→ 号码 {n}（数量推出，权重 +2）")
+
+    # 方位维度若因覆盖全部号码而失效，已由 _apply_dimension 写进 trace，此处不再重复
+
     if not score:
-        # recommended 始终是 dict（main/special），避免调用方拿到 list 而崩
+        # recommended 始终是 dict（main/special），避免调用方拿到 list 而崩。
+        # 注意：必须保留已有 trace——否则所有维度都被护栏丢弃时，
+        # 用户只能看到"未选择任何解码元素"，完全不知道发生了什么。
         return {
             "all_candidates": [],
             "recommended": {"main": [], "special": None},
-            "decode_trace": ["⚠️ 未选择任何解码元素"]
+            "decode_trace": trace + ["⚠️ 未选择任何解码元素"]
         }
 
     # 按权重排序
