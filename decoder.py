@@ -176,6 +176,45 @@ def get_all_categories():
     }
 
 
+def _iter_numbers(raw):
+    """
+    把外部传入的号码线索统一收敛成 1-49 的整数。
+
+    `decode_elements` 是对外 API，`numbers` / `count_numbers` 可能来自
+    前端或第三方调用，值可能是 int（8）、字符串（"8"）、带空格的字符串（" 8 "）
+    甚至非数字文本。原实现直接做 `1 <= n <= 49`，遇到字符串会抛
+    `TypeError: '<=' not supported between instances of 'int' and 'str'`
+    导致整个接口 500。这里统一转换，非法值直接跳过（不抛异常）。
+    """
+    if raw is None:
+        return
+    if not isinstance(raw, (list, tuple, set)):
+        raw = [raw]
+    for item in raw:
+        if isinstance(item, bool):
+            continue
+        n = None
+        if isinstance(item, int):
+            n = item
+        elif isinstance(item, float):
+            # 8.0 视为 8；8.5 这类非整数一律忽略
+            if item.is_integer():
+                n = int(item)
+        else:
+            text = str(item).strip()
+            try:
+                n = int(text)
+            except ValueError:
+                try:
+                    f = float(text)
+                except ValueError:
+                    continue
+                if f.is_integer():
+                    n = int(f)
+        if n is not None and 1 <= n <= 49:
+            yield n
+
+
 def decode_elements(selections):
     """
     根据用户选择的元素进行多维交叉解码
@@ -294,17 +333,15 @@ def decode_elements(selections):
 
     # 6. 处理图上直接写出的数字（强线索，权重 5）
     #    「石碑上刻着 8」这类是玄机图里最直接的号码暗示，比生肖/五行更具体。
-    for n in selections.get("numbers", []):
-        if 1 <= n <= 49:
-            _add(n, 5, "数字", str(n), f"图上直接出现数字「{n}」")
-            trace.append(f"🔢 图上数字【{n}】→ 号码 {n}（直接暗示，权重 +5）")
+    for n in _iter_numbers(selections.get("numbers")):
+        _add(n, 5, "数字", str(n), f"图上直接出现数字「{n}」")
+        trace.append(f"🔢 图上数字【{n}】→ 号码 {n}（直接暗示，权重 +5）")
 
     # 7. 处理数量推出的数字（弱线索，权重 2）
     #    「三盏灯笼」→ 3，间接但仍是线索。
-    for n in selections.get("count_numbers", []):
-        if 1 <= n <= 49:
-            _add(n, 2, "数量", str(n), f"图中元素数量为「{n}」")
-            trace.append(f"🔢 数量线索【{n}】→ 号码 {n}（数量推出，权重 +2）")
+    for n in _iter_numbers(selections.get("count_numbers")):
+        _add(n, 2, "数量", str(n), f"图中元素数量为「{n}」")
+        trace.append(f"🔢 数量线索【{n}】→ 号码 {n}（数量推出，权重 +2）")
 
     # 方位维度若因覆盖全部号码而失效，已由 _apply_dimension 写进 trace，此处不再重复
 
@@ -323,11 +360,17 @@ def decode_elements(selections):
     # 按权重排序
     sorted_candidates = sorted(score.items(), key=lambda x: x[1], reverse=True)
 
-    # 取 Top 7（6正码 + 1特码）
+    # 取 Top 7（6正码 + 1特码）。
+    # 六合彩是七球同机无放回摇出，**七个号码必然互不相同**，
+    # 因此特码绝不能与正码重复（原实现在候选不足 7 个时回退成
+    # sorted_candidates[-1]，会与正码撞号，例如「生肖马」给出正码含 49、特码也是 49）。
     top_nums = [n for n, _ in sorted_candidates[:7]]
+    main = sorted(top_nums[:6])
+    rest = [n for n in top_nums if n not in main]
     recommended = {
-        "main": sorted(top_nums[:6]),
-        "special": top_nums[6] if len(top_nums) > 6 else sorted_candidates[-1][0]
+        "main": main,
+        # 候选不足 7 个时宁可不给特码，也不重复正码
+        "special": rest[0] if rest else None,
     }
 
     return {

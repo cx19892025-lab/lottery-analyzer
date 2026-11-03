@@ -264,6 +264,14 @@ body {
     gap: 4px;
 }
 
+/* 候选不足 7 个时不给特码（七球互异，不能与正码重复） */
+.no-special {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: 8px;
+    font-style: italic;
+}
+
 /* ==================== 历史记录表格 ==================== */
 
 .history-table {

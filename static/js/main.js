@@ -101,6 +101,25 @@ function createBall(num, isSpecial = false) {
     return `<span class="${cls}">${num}</span>`;
 }
 
+/**
+ * 渲染「正码 + 特码」一行。
+ * 解码器在候选不足 7 个时会返回 special = null（六合彩七球互异，
+ * 宁可不给特码也不能与正码重复），此时不能画出 "+ null" 这种球。
+ */
+function renderBallsRow(rec) {
+    const balls = (rec.main || []).map(n => createBall(n)).join("");
+    if (rec.special == null) {
+        return `<div class="balls-row">${balls}
+            <span class="no-special">候选号码不足 7 个，暂无特码推荐</span>
+        </div>`;
+    }
+    return `<div class="balls-row">
+        ${balls}
+        <span class="ball plus">+</span>
+        ${createBall(rec.special, true)}
+    </div>`;
+}
+
 // ==================== 标签页切换 ====================
 document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -1499,17 +1518,11 @@ async function doVisionDecode(imageDataUrl, mimeType) {
         // 显示解码结果
         if (decode.recommended && decode.recommended.main) {
             const rec = decode.recommended;
-            const balls = rec.main.map(n => createBall(n)).join("");
-            const specialBall = createBall(rec.special, true);
 
             resultDiv.innerHTML = `
                 <div class="result-display">
                     <div class="label">🔮 AI 图解码推荐号码</div>
-                    <div class="balls-row">
-                        ${balls}
-                        <span class="ball plus">+</span>
-                        ${specialBall}
-                    </div>
+                    ${renderBallsRow(rec)}
                 </div>
             `;
 
@@ -1599,17 +1612,11 @@ async function doDecode() {
     }
 
     const rec = data.recommended;
-    const balls = rec.main.map(n => createBall(n)).join("");
-    const specialBall = createBall(rec.special, true);
 
     resultDiv.innerHTML = `
         <div class="result-display">
             <div class="label">🔮 解码推荐号码</div>
-            <div class="balls-row">
-                ${balls}
-                <span class="ball plus">+</span>
-                ${specialBall}
-            </div>
+            ${renderBallsRow(rec)}
         </div>
     `;
 
