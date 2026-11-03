@@ -1101,6 +1101,10 @@ async function loadDecoderCategories() {
     container.innerHTML = Object.entries(categories).map(([key, cat]) => `
         <div class="decode-category">
             <h3>${cat.icon} ${cat.name}</h3>
+            ${cat.table_info ? `<div class="decode-table-hint">
+                当前生效：农历 ${cat.table_info.lunar_year} ${cat.table_info.animal}年表
+                （${cat.table_info.effective_from} 起，生肖表随农历新年轮换）
+            </div>` : ""}
             <div class="decode-options">
                 ${cat.options.map(opt => `
                     <span class="decode-option" data-category="${key}" data-value="${opt}"

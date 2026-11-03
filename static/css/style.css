@@ -980,3 +980,15 @@ body {
         align-items: flex-start;
     }
 }
+
+/* V1.4.1 生肖表生效说明（随农历年轮换，需明确告知用户） */
+.decode-table-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border-left: 2px solid var(--accent-2);
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin: -4px 0 10px;
+    line-height: 1.5;
+}

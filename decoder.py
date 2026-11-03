@@ -5,26 +5,68 @@
 import json
 import os
 from collections import Counter
+from datetime import date
+from functools import lru_cache
+
+from lunardate import LunarDate
 
 MAPPINGS_PATH = os.path.join(os.path.dirname(__file__), "data", "mappings.json")
 
 # ==================== 核心映射知识库 ====================
 
-# 2024年甲辰年 生肖对应号码（每年会轮转，此为示例）
-ZODIAC_MAP = {
-    "鼠": [2, 14, 26, 38],
-    "牛": [1, 13, 25, 37, 49],
-    "虎": [12, 24, 36, 48],
-    "兔": [11, 23, 35, 47],
-    "龙": [10, 22, 34, 46],
-    "蛇": [9, 21, 33, 45],
-    "马": [8, 20, 32, 44],
-    "羊": [7, 19, 31, 43],
-    "猴": [6, 18, 30, 42],
-    "鸡": [5, 17, 29, 41],
-    "狗": [4, 16, 28, 40],
-    "猪": [3, 15, 27, 39],
+# 十二生肖固定顺序（也是轮转的依据）
+ZODIAC_ORDER = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"]
+
+# (农历年 % 12) -> 生肖，已用 2020 庚子鼠年、2026 丙午马年验证
+_ZODIAC_BY_MOD = {
+    4: "鼠", 5: "牛", 6: "虎", 7: "兔", 8: "龙", 9: "蛇",
+    10: "马", 11: "羊", 0: "猴", 1: "鸡", 2: "狗", 3: "猪",
 }
+
+
+def lunar_year_of(d=None):
+    """公历日期所属农历年（以农历正月初一为界）"""
+    d = d or date.today()
+    return LunarDate.from_solar_date(d.year, d.month, d.day).year
+
+
+def year_zodiac(lunar_year):
+    """农历年对应的生肖"""
+    return _ZODIAC_BY_MOD[int(lunar_year) % 12]
+
+
+@lru_cache(maxsize=16)
+def _zodiac_map_for(lunar_year):
+    """
+    构造某农历年的生肖→号码表（缓存）
+    规则：当年生肖 = 1/13/25/37/49，其余号码按生肖逆序轮排。
+    例 2026 马年：马=1,13,25,37,49；蛇=2,14,…；龙=3,15,…；…；羊=12,24,…
+    """
+    idx = ZODIAC_ORDER.index(year_zodiac(lunar_year))
+    mapping = {a: [] for a in ZODIAC_ORDER}
+    for n in range(1, 50):
+        mapping[ZODIAC_ORDER[(idx - (n - 1)) % 12]].append(n)
+    return mapping
+
+
+def get_zodiac_map(d=None):
+    """
+    取指定日期（默认今天）生效的生肖→号码表。
+    生肖表在农历正月初一换新，因此同一公历年 1~2 月的开奖可能仍属上一生肖年。
+    """
+    return dict(_zodiac_map_for(lunar_year_of(d)))
+
+
+def zodiac_info(d=None):
+    """当前生效生肖表的元信息（供前端展示，避免用户误读）"""
+    d = d or date.today()
+    ly = lunar_year_of(d)
+    cny = LunarDate(ly, 1, 1).to_solar_date()
+    return {
+        "lunar_year": ly,
+        "animal": year_zodiac(ly),
+        "effective_from": cny.strftime("%Y-%m-%d"),
+    }
 
 # 五行对应号码
 WUXING_MAP = {
@@ -92,8 +134,10 @@ def get_all_categories():
     return {
         "zodiac": {
             "name": "十二生肖",
-            "options": list(ZODIAC_MAP.keys()),
-            "icon": "🐾"
+            "options": ZODIAC_ORDER,
+            "icon": "🐾",
+            # 提醒前端：生肖表随农历年轮转，需标明当前用的是哪一年的表
+            "table_info": zodiac_info(),
         },
         "wuxing": {
             "name": "五行",
@@ -128,20 +172,23 @@ def decode_elements(selections):
     返回: {
         "all_candidates": [所有候选号码及权重],
         "recommended": [推荐号码Top7],
-        "decode_trace": [解码过程说明]
+        "decode_trace": [解码过程说明],
+        "zodiac_table": {当前生效的生肖表信息}
     }
     """
     # 号码权重计数器
     score = Counter()
     trace = []
+    zmap = get_zodiac_map()          # 当前农历年生效的生肖表
+    zinfo = zodiac_info()
 
     # 1. 处理生肖
     for z in selections.get("zodiac", []):
-        if z in ZODIAC_MAP:
-            nums = ZODIAC_MAP[z]
+        if z in zmap:
+            nums = zmap[z]
             for n in nums:
                 score[n] += 3  # 生肖权重最高
-            trace.append(f"🐾 生肖【{z}】→ 号码 {nums}")
+            trace.append(f"🐾 生肖【{z}】→ 号码 {nums}（{zinfo['lunar_year']} {zinfo['animal']}年表）")
 
     # 2. 处理五行
     for w in selections.get("wuxing", []):
@@ -172,8 +219,8 @@ def decode_elements(selections):
         if kw in ELEMENT_HINTS:
             mapped = ELEMENT_HINTS[kw]
             # 判断映射到哪个维度
-            if mapped in ZODIAC_MAP:
-                nums = ZODIAC_MAP[mapped]
+            if mapped in zmap:
+                nums = zmap[mapped]
                 for n in nums:
                     score[n] += 3
                 trace.append(f"🔍 关键词【{kw}】→ 生肖{mapped} → {nums}")
@@ -208,7 +255,8 @@ def decode_elements(selections):
     return {
         "all_candidates": [{"number": n, "score": s} for n, s in sorted_candidates],
         "recommended": recommended,
-        "decode_trace": trace
+        "decode_trace": trace,
+        "zodiac_table": zinfo,
     }
 
 
@@ -219,7 +267,7 @@ def quick_decode(keyword):
     if keyword in ELEMENT_HINTS:
         mapped = ELEMENT_HINTS[keyword]
         for source_name, source_map in [
-            ("生肖", ZODIAC_MAP),
+            ("生肖", get_zodiac_map()),
             ("五行", WUXING_MAP),
             ("色波", COLOR_MAP)
         ]:
@@ -232,7 +280,7 @@ def quick_decode(keyword):
 
     # 直接匹配生肖/五行/色波
     for source_name, source_map in [
-        ("生肖", ZODIAC_MAP),
+        ("生肖", get_zodiac_map()),
         ("五行", WUXING_MAP),
         ("色波", COLOR_MAP)
     ]:

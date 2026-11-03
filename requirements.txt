@@ -1,6 +1,8 @@
 flask>=3.0
 pandas>=2.0
 numpy>=1.24
+# 农历换算：生肖表按农历正月初一切换（纯 Python，无额外依赖）
+lunardate>=0.2
 
 # AI 识图（可选）：需要用户自备 OpenAI 兼容接口
 openai>=1.0
