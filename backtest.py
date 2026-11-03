@@ -13,15 +13,17 @@
 而非用于预测。若各策略命中率无显著差异，说明"热号/冷号"等说法没有统计依据。
 """
 import random
-from database import get_all_results
+from database import get_all_results, set_history_cutoff
 
-STRATEGIES = ["balanced", "hot", "cold", "random"]
+STRATEGIES = ["balanced", "hot", "cold", "random", "zodiac_hot", "zodiac_cold"]
 
 STRATEGY_NAMES = {
     "balanced": "⚖️ 均衡策略",
     "hot": "🔥 热号优先",
     "cold": "❄️ 冷号博回",
     "random": "🎰 纯随机",
+    "zodiac_hot": "🐲 热生肖",
+    "zodiac_cold": "🐉 冷生肖",
 }
 
 # 回测开始前至少需要多少期历史数据做分析
@@ -169,6 +171,10 @@ def run_backtest(strategies=None, min_history=MIN_HISTORY, max_periods=None,
     if max_periods:
         start = max(min_history, total - int(max_periods))
 
+    # 传给 smart_recommend 的 limit：只要历史足够即可，实际截断由
+    # set_history_cutoff 按期号完成（limit 仅限制统计窗口大小）。
+    history_limit = None
+
     results = {s: [] for s in strategies}
 
     # 全局随机状态：给定 seed 时结果完全可复现。
@@ -180,7 +186,15 @@ def run_backtest(strategies=None, min_history=MIN_HISTORY, max_periods=None,
     try:
         for i in range(start, total):
             actual = periods[i]
-            history_limit = i  # 只用前 i 期，绝不看当期及未来
+
+            # 防未来数据泄露的关键：把历史截止期号设为**当期期号**，
+            # 之后所有 get_all_results 调用（包括 analyzer 里十几个统计函数
+            # 内部自己发起的）都只能看到这一期之前的数据。
+            #
+            # 早期版本只传 limit=i 给 smart_recommend，但 limit 的语义是
+            # "全库最新的 i 期"，在回测早期会取到未来若干年的数据，
+            # 导致回测结果完全失真。现改为按期号截断。
+            set_history_cutoff(actual["period"])
 
             for strategy in strategies:
                 saved = random.getstate()
@@ -190,6 +204,7 @@ def run_backtest(strategies=None, min_history=MIN_HISTORY, max_periods=None,
                 random.setstate(saved)  # 回滚，让下一个策略用同一段序列
                 results[strategy].append(_evaluate(prediction, actual))
     finally:
+        set_history_cutoff(None)
         random.setstate(global_state)
 
     periods_backtested = total - start
