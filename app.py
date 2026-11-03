@@ -304,9 +304,13 @@ def _build_trial_client(trial):
         timeout=trial.get("timeout", 60),
     )
 
-# 1x1 透明 PNG，用来验证接口是否真的支持图片输入
-_TINY_PNG = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42m"
-             "P8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=")
+# 64x64 白色 PNG，用来验证接口是否真的支持图片输入。
+# 不能用 1x1 图：部分视觉模型（如 qwen3-vl-plus）要求宽高都 > 10px，
+# 否则会报 invalid_parameter_error，被误判成「模型不支持看图」。
+_PROBE_PNG = ("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAfElEQVR4nNXO"
+              "QREAIADDsFL/nocIHlyjIGcbZRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRInc"
+              "RIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncRIncR"
+              "IncRIncRIncf4OvLpyqgN9ZSiDcwAAAABJRU5ErkJggg==")
 
 
 @app.route("/api/settings/models", methods=["POST"])
@@ -406,7 +410,7 @@ def api_settings_test():
                     {"role": "system", "content": VISION_SYSTEM_PROMPT},
                     {"role": "user", "content": [
                         {"type": "image_url",
-                         "image_url": {"url": f"data:image/png;base64,{_TINY_PNG}"}},
+                         "image_url": {"url": f"data:image/png;base64,{_PROBE_PNG}"}},
                         {"type": "text", "text": VISION_USER_PROMPT},
                     ]},
                 ],
