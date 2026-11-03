@@ -1138,6 +1138,11 @@ async function loadSettings(force) {
         : "尚未保存任何 Key";
 
     renderPresets(s.presets || []);
+
+    // 分享版预置的 Key：提示使用者这不是自己的，建议替换
+    const notice = document.getElementById("borrowedKeyNotice");
+    if (notice) notice.style.display = s.borrowed_key ? "block" : "none";
+
     settingsLoaded = true;
     settingsDirty = false;
 }

@@ -3,14 +3,11 @@
 基于生肖、五行、色波等传统映射体系，将图像元素转换为号码推荐
 """
 import json
-import os
 from collections import Counter, defaultdict
 from datetime import date
 from functools import lru_cache
 
 from lunardate import LunarDate
-
-MAPPINGS_PATH = os.path.join(os.path.dirname(__file__), "data", "mappings.json")
 
 # ==================== 核心映射知识库 ====================
 

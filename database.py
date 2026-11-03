@@ -6,7 +6,11 @@ import sqlite3
 import random
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "lottery.db")
+from paths import user_data_path, ensure_user_data
+
+# 打包成 exe 后程序目录只读，数据库必须落在用户目录（见 paths.py）。
+# 首次运行会把包内的 4404 期初始数据复制到用户目录。
+DB_PATH = user_data_path("lottery.db")
 
 
 def get_connection():
@@ -17,7 +21,8 @@ def get_connection():
 
 
 def init_db():
-    """初始化数据库表结构"""
+    """初始化数据库表结构（打包运行时先把包内初始数据复制到用户目录）"""
+    ensure_user_data("lottery.db")
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""

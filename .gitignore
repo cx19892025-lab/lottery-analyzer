@@ -15,6 +15,10 @@ data/*.db
 data/settings.json
 data/settings.json.*
 
+# 分享版标记（打包时写入，表示 Key 由分享者提供）
+data/SHARED_BUILD
+*.spec
+
 # IDE
 .vscode/
 .idea/
