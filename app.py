@@ -395,21 +395,26 @@ def api_settings_test():
         stages.append({"name": "文本对话", "ok": False, "detail": _friendly_error(e)})
 
     # ③ 图片对话（图猜码的前提）
+    # 必须复用真实识图所用的提示词：服务商侧的内容审核对措辞极其敏感，
+    # 另写一套探测提示词会出现「探测失败但实际识图可用」的假阴性
     if text_ok:
         try:
+            from vision import VISION_SYSTEM_PROMPT, VISION_USER_PROMPT
             resp = client.chat.completions.create(
                 model=trial["model"],
-                messages=[{
-                    "role": "user",
-                    "content": [
+                messages=[
+                    {"role": "system", "content": VISION_SYSTEM_PROMPT},
+                    {"role": "user", "content": [
                         {"type": "image_url",
                          "image_url": {"url": f"data:image/png;base64,{_TINY_PNG}"}},
-                        {"type": "text", "text": "回复两个字：可用"},
-                    ],
-                }],
-                max_tokens=16,
+                        {"type": "text", "text": VISION_USER_PROMPT},
+                    ]},
+                ],
+                max_tokens=512,
             )
             reply = (resp.choices[0].message.content or "").strip()
+            if not reply:
+                reply = (getattr(resp.choices[0].message, "reasoning_content", "") or "").strip()
             stages.append({"name": "图片对话（识图必需）", "ok": True,
                            "detail": f"该模型支持看图，已响应：{reply[:40]}"})
         except Exception as e:

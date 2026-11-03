@@ -112,7 +112,12 @@ def analyze_image(image_data_b64: str, mime_type: str = "image/png") -> dict:
             max_tokens=max_tokens,
         )
 
-        raw_content = response.choices[0].message.content or ""
+        msg = response.choices[0].message
+        raw_content = msg.content or ""
+        # 部分模型（推理型）在 max_tokens 偏小时会把输出全放进 reasoning_content，
+        # 此时 content 为空串，回退去读 reasoning_content
+        if not raw_content.strip():
+            raw_content = getattr(msg, "reasoning_content", "") or ""
         return _parse_json_response(raw_content)
 
     except Exception as e:
@@ -128,6 +133,14 @@ def _friendly_error(e) -> str:
     msg = str(e)
     low = msg.lower()
     tail = f"（原始报错：{msg[:200]}）"
+
+    # 服务商侧内容审核网关拦截：整次请求被判敏感，并非图片里某块内容有问题
+    if "sensitive_words_detected" in low or "sensitive" in low:
+        return ("请求被服务商的内容审核拦截（错误码 sensitive_words_detected）。"
+                "这是服务商网关对**整次请求文本**的判定，与图片里的具体内容无关"
+                "（实测纯数字图、甚至 1×1 像素图也可能被拦，含『必中/投注』字样的图反而能通过）。"
+                "建议：稍后重试、换一个模型（如 qwen3-vl-plus），"
+                "并保持内置的识图提示词不变。" + tail)
 
     # 中转站/服务商上游故障：常以 400 或 5xx 出现，报错体里带 upstream_unavailable
     if ("upstream_unavailable" in low or "server_error" in low
