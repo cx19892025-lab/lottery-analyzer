@@ -427,6 +427,43 @@ decoder.decode_elements(selections)
 - **对 V1.4 遗留事项 2 的更新**：该项已完成，不再需要下版本处理
 - **关于统计窗口（用户决定）**：实测 150 期 32ms、500 期 132ms、全量 4393 期 872ms；用户选择**保持默认 500 期**，下拉选项不变（100/300/500/1000/全部）
 
+### V1.4.2 — 特码专项统计 + 正码生肖分布 (2026-11-03 13:40)
+- **负责智能体**：GLM
+- **修改目标**（用户提出）：1) 特码单独统计（数字、生肖、波色）；2) 主号（6 个正码）的生肖分布情况。
+- **实现**：
+  - `analyzer.py`：新增 `special_stats(limit)` —— 特码号码频次（1-49）、期望值（总期数/49）、冷热 Top/Bottom、生肖分布（含百分比）、波色分布（含百分比）；新增 `main_zodiac_stats(limit)` —— 6 个正码的生肖分布与百分比、期望值（总号码数/12）。
+  - **生肖按各期开奖日期所属农历年换算**（复用 V1.4.1 的动态生肖表），因此特码/正码生肖分布与「图猜码」推导口径完全一致；波色反查表 `COLOR_OF_NUMBER` 由 `decoder.COLOR_MAP` 生成，避免两处各写一份。
+  - `app.py`：`get_dashboard_data()` 新增 `special_stats` / `main_zodiac` 两个键；**并新增 `app.json.sort_keys = False`** —— Flask 默认按字母重排 JSON key，会把生肖顺序打乱导致图表横轴变成 虎/狗/虎…，必须保留插入顺序。
+  - `templates/index.html`：新增 4 张图表卡片（特码频次 / 特码波色 / 特码生肖 / 正码生肖），各带 `.chart-note` 说明（"按各期开奖日期所属农历年的生肖表换算"、"虚线为 12 生肖均分的期望值"）。
+  - `static/js/main.js`：新增 `WAVE_COLORS` 与 `renderSpecialFreqChart()` / `renderSpecialColorChart()` / `renderSpecialZodiacChart()` / `renderMainZodiacChart()`，在 `loadDashboard()` 中联动渲染。
+- **自测验证**：特码频次合计 = 总期数、生肖合计 = 总期数、波色合计 = 总期数（守恒校验通过）；独立重算波色与实现一致；两个函数各约 4ms，不影响 Dashboard 响应时间 ✅
+- **注意**：所有统计都跟随仪表盘的**统计窗口**（默认近 500 期）联动，不是全库口径。
+
+### V1.4.3 — 修复「图片包含敏感内容」误报 (2026-11-03 14:20)
+- **负责智能体**：GLM
+- **问题现象**：用户上传玄机图识图，报「图片包含敏感内容」（HTTP 400，`sensitive_words_detected`）。
+- **根因（8 组对照实验确认）**：**与图片内容无关**。服务商的审核网关是按**整次请求的文本**（system + user prompt）判定，与图片字节无关。实验记录：
+
+  | system 提示词 | user 文本 | 带图 | 结果 |
+  |---|---|---|---|
+  | 无 | 短（"回复两个字：可用"） | 是 | 200 ✅ |
+  | 识图 | 短 | 是 | 200 ✅ |
+  | 无 | 识图提示词 | 是 | **400 sensitive** ❌ |
+  | 无 | 中性长描述 | 是 | **400 sensitive** ❌ |
+  | 中性「图像助手」 | 中性描述 | 否 | **400 sensitive** ❌ |
+  | 识图 | 识图提示词 | 否 | 200 ✅ |
+
+  即：纯数字图、甚至 1×1 像素图会被拦；而含「必中 / 投注 / 特码」字样的图反而 200 通过 —— 属服务商侧规则误伤。
+- **修复**：
+  1. `vision.py` 的 `_friendly_error()` 新增 `sensitive_words_detected` 分支：明确告知用户这是网关对**请求文本**的判定、与图片无关，并给出「稍后重试 / 换模型 / 保持内置提示词」的建议，而不是含糊地说"图片有问题"。
+  2. `app.py` 设置页「🔌 测试连接」第③步「图片对话」**改为复用真实识图的 `VISION_SYSTEM_PROMPT` + `VISION_USER_PROMPT`**，`max_tokens` 16→512。原先用另写的一套中性探测提示词，会出现「探测失败但实际识图可用」的假阴性（现已通过真实提示词复测：三阶段全绿）。
+  3. `vision.py` 的 `analyze_image()`：`content` 为空时回退去解析 `reasoning_content`（部分推理型模型在 `max_tokens` 偏小时把输出全放 reasoning 里）；`app.py` 测试连接第③步同样加了这条回退。
+- **模型兼容性结论（服务端 autodl.art，实测）**：
+  - ✅ `DeepSeek-V4.1-Flash-1017`（当前配置）
+  - ✅ `qwen3-vl-plus`、✅ `qwen3.6-plus`（返回内容带 ```json 围栏，解析器已兼容）
+  - ❌ `qwen3.7-max`：不支持 `image_url` 格式，报 `invalid_parameter_error`（"Unexpected item type in content"）
+- **自测验证**：真实识图路径（红底白椭圆 PNG）返回 `colors: ['红色','白色']`、`description: 红色背景正中央有一个白色椭圆形图案。`，无 error；`/api/settings/test` 三阶段全绿（模型列表 42 个命中 ✓ / 文本对话 ✓ / 图片对话 ✓）✅
+
 ---
 
 ## 四、待开发 (Backlog)
@@ -484,3 +521,5 @@ app.py ──→ database.py   (数据读写)
 - 必须使用**支持图片输入**的模型，纯文本模型无法识图。
 - 未配置时：图猜码禁用上传并引导去设置，**手动选元素解码不受影响**。
 - 排错顺序：设置页「🔌 测试连接」→ 看返回的中文提示（已覆盖 401/403/404/429/超时/连不上）。
+- **遇到 `sensitive_words_detected`（"图片包含敏感内容"）**：这是**服务商审核网关按请求文本**误判，与图片内容无关（详见 V1.4.3）。对策：稍后重试、换模型（`qwen3-vl-plus` / `qwen3.6-plus` 可用，`qwen3.7-max` 不支持 `image_url` 格式），不要随意改写内置识图提示词（改了反而可能触发审核）。
+- 识图提示词 `VISION_SYSTEM_PROMPT` / `VISION_USER_PROMPT` 被「测试连接」第③步与真实识图**共用**，改一处即可同时生效，不要另写探测提示词。
