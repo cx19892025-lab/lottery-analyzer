@@ -57,6 +57,7 @@
                 <div class="grid-2">
                     <div class="card">
                         <div class="card-title"><span class="icon">📊</span> 号码出现频率</div>
+                        <div class="chart-note">正码 + 特码合计；虚线为理论期望值</div>
                         <div class="chart-container" id="chartFrequency"></div>
                     </div>
                     <div class="card">
@@ -73,61 +74,70 @@
                     </div>
                     <div class="card">
                         <div class="card-title"><span class="icon">⏳</span> 遗漏值排行</div>
+                        <div class="chart-note">已连续多少期未出现，越久越"冷"</div>
                         <div class="chart-container" id="chartMissing"></div>
                     </div>
                 </div>
 
-                <!-- 奇偶比 + 大小比 + 尾数 -->
-                <div class="grid-3">
-                    <div class="card">
-                        <div class="card-title"><span class="icon">⚖️</span> 奇偶比分布</div>
-                        <div class="chart-container-sm" id="chartOddEven"></div>
-                    </div>
-                    <div class="card">
-                        <div class="card-title"><span class="icon">📏</span> 大小比分布</div>
-                        <div class="chart-container-sm" id="chartBigSmall"></div>
-                    </div>
-                    <div class="card">
-                        <div class="card-title"><span class="icon">🔢</span> 尾数分布</div>
-                        <div class="chart-container-sm" id="chartTail"></div>
-                    </div>
+                <!-- ============ 特码专项（猜特码玩法，赔率最高）============ -->
+                <div class="section-divider">
+                    <span class="icon">✨</span> 特码专项分析
+                    <span class="section-hint">每期只开 1 个，赔率最高；与正码是两个独立玩法</span>
                 </div>
 
-                <!-- 和值 + 连号 -->
-                <div class="grid-2">
-                    <div class="card">
-                        <div class="card-title"><span class="icon">➕</span> 和值分布</div>
-                        <div class="chart-container" id="chartSum"></div>
-                    </div>
-                    <div class="card">
-                        <div class="card-title"><span class="icon">🔗</span> 连号分析</div>
-                        <div class="chart-container" id="chartConsecutive"></div>
-                    </div>
-                </div>
-
-                <!-- 特码专项统计 -->
                 <div class="grid-2">
                     <div class="card">
                         <div class="card-title"><span class="icon">✨</span> 特码号码频次</div>
+                        <div class="chart-note">虚线为理论期望值（每号约 2.04%）</div>
                         <div class="chart-container" id="chartSpecialFreq"></div>
                     </div>
                     <div class="card">
-                        <div class="card-title"><span class="icon">🎨</span> 特码波色分布</div>
-                        <div class="chart-container-sm" id="chartSpecialColor"></div>
+                        <div class="card-title"><span class="icon">⏳</span> 特码遗漏排行</div>
+                        <div class="chart-note">最久没开出的特码</div>
+                        <div class="chart-container" id="chartSpecialMissing"></div>
                     </div>
                 </div>
 
-                <!-- 生肖分布（特码 / 正码） -->
                 <div class="grid-2">
                     <div class="card">
-                        <div class="card-title"><span class="icon">🐾</span> 特码生肖分布</div>
-                        <div class="chart-note">按各期开奖日期所属农历年的生肖表换算</div>
-                        <div class="chart-container" id="chartSpecialZodiac"></div>
+                        <div class="card-title"><span class="icon">🎨</span> 特码波色分布</div>
+                        <div class="chart-note">虚线为各自期望占比（红 17 号、蓝绿各 16 号）</div>
+                        <div class="chart-container-sm" id="chartSpecialColor"></div>
                     </div>
                     <div class="card">
-                        <div class="card-title"><span class="icon">🐾</span> 正码生肖分布（6 个主号）</div>
+                        <div class="card-title"><span class="icon">🐾</span> 特码生肖分布</div>
+                        <div class="chart-note">按各期开奖日期所属农历年的生肖表换算；虚线为均分期望 8.33%</div>
+                        <div class="chart-container-sm" id="chartSpecialZodiac"></div>
+                    </div>
+                </div>
+
+                <!-- ============ 正码单号（猜正码玩法）============ -->
+                <div class="section-divider">
+                    <span class="icon">🎯</span> 正码单号分析
+                    <span class="section-hint">每期开 6 个，赔率低于特码；只看"单个号码会不会出"</span>
+                </div>
+
+                <div class="grid-2">
+                    <div class="card">
+                        <div class="card-title"><span class="icon">🎯</span> 正码出现次数</div>
+                        <div class="chart-note">虚线为理论期望值（每号约 12.24%）</div>
+                        <div class="chart-container" id="chartMainNumbers"></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title"><span class="icon">🐾</span> 正码生肖分布</div>
                         <div class="chart-note">虚线为 12 生肖均分的期望值</div>
                         <div class="chart-container" id="chartMainZodiac"></div>
+                    </div>
+                </div>
+
+                <!-- ============ 号码属性速查 ============ -->
+                <div class="card">
+                    <div class="card-title"><span class="icon">📇</span> 号码属性速查表</div>
+                    <div class="chart-note" id="attributesNote">
+                        每个号码的生肖 / 波色 / 五行；按生肖或波色下注时用这张表对照
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table class="attr-table" id="attrTable"></table>
                     </div>
                 </div>
             </div>

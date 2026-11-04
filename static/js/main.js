@@ -157,19 +157,21 @@ async function loadDashboard() {
         document.getElementById("dashboardContent").style.display = "block";
 
         renderStatCards();
+        // 单号维度：整体频率与冷热
         renderFrequencyChart();
         renderHeatmap();
         renderHotColdChart();
         renderMissingChart();
-        renderOddEvenChart();
-        renderBigSmallChart();
-        renderTailChart();
-        renderSumChart();
-        renderConsecutiveChart();
+        // 特码专项（猜特码玩法）
         renderSpecialFreqChart();
+        renderSpecialMissingChart();
         renderSpecialColorChart();
         renderSpecialZodiacChart();
+        // 正码单号（猜正码玩法）
+        renderMainNumbersChart();
         renderMainZodiacChart();
+        // 号码属性速查表
+        renderAttributesTable();
     } catch (e) {
         document.getElementById("dashboardLoading").innerHTML =
             `<span style="color:#ef4444;">❌ 加载失败: ${e.message}</span>`;
@@ -196,12 +198,12 @@ function renderStatCards() {
             <div class="label">最低频号码 (${minNum[1]}次)</div>
         </div>
         <div class="stat-card">
-            <div class="value">${d.consecutive.consecutive_rate}%</div>
-            <div class="label">连号出现率</div>
+            <div class="value">${d.special_stats?.expected_per_number ?? "—"}</div>
+            <div class="label">特码每号期望次数</div>
         </div>
         <div class="stat-card">
-            <div class="value">${d.sum.avg}</div>
-            <div class="label">平均和值</div>
+            <div class="value">${d.main_numbers?.expected_per_number ?? "—"}</div>
+            <div class="label">正码每号期望次数</div>
         </div>
     `;
     document.getElementById("statCards").innerHTML = html;
@@ -393,155 +395,6 @@ function renderMissingChart() {
     window.addEventListener("resize", () => chart.resize());
 }
 
-function renderOddEvenChart() {
-    const chart = echarts.init(document.getElementById("chartOddEven"));
-    const dist = dashboardData.odd_even.distribution;
-
-    chart.setOption({
-        tooltip: { trigger: "item" },
-        series: [{
-            type: "pie",
-            radius: ["40%", "70%"],
-            data: Object.entries(dist).map(([k, v]) => ({
-                name: `奇偶 ${k}`,
-                value: v
-            })),
-            label: { color: "#e2e8f0", fontSize: 12 },
-            emphasis: { itemStyle: { shadowBlur: 10, shadowColor: "rgba(0,0,0,0.5)" } }
-        }],
-        color: ["#e94560", "#0ea5e9", "#10b981", "#f59e0b", "#8b5cf6", "#ec4899", "#06b6d4"],
-    });
-    window.addEventListener("resize", () => chart.resize());
-}
-
-function renderBigSmallChart() {
-    const chart = echarts.init(document.getElementById("chartBigSmall"));
-    const dist = dashboardData.big_small.distribution;
-
-    chart.setOption({
-        tooltip: { trigger: "item" },
-        series: [{
-            type: "pie",
-            radius: ["40%", "70%"],
-            data: Object.entries(dist).map(([k, v]) => ({
-                name: `大小 ${k}`,
-                value: v
-            })),
-            label: { color: "#e2e8f0", fontSize: 12 },
-        }],
-        color: ["#f59e0b", "#3b82f6", "#ef4444", "#22c55e", "#a855f7", "#ec4899", "#06b6d4"],
-    });
-    window.addEventListener("resize", () => chart.resize());
-}
-
-function renderTailChart() {
-    const chart = echarts.init(document.getElementById("chartTail"));
-    const tail = dashboardData.tail;
-    const tails = Object.keys(tail).sort((a, b) => a - b);
-
-    chart.setOption({
-        tooltip: { trigger: "axis" },
-        xAxis: {
-            type: "category",
-            data: tails,
-            axisLabel: { color: "#94a3b8" },
-            axisLine: { lineStyle: { color: "#334155" } }
-        },
-        yAxis: {
-            type: "value",
-            axisLabel: { color: "#94a3b8" },
-            splitLine: { lineStyle: { color: "#1e293b" } }
-        },
-        series: [{
-            type: "bar",
-            data: tails.map(t => tail[t]),
-            itemStyle: {
-                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    { offset: 0, color: "#10b981" },
-                    { offset: 1, color: "#059669" }
-                ])
-            },
-            barWidth: "50%"
-        }],
-        grid: { left: 40, right: 16, top: 16, bottom: 30 },
-    });
-    window.addEventListener("resize", () => chart.resize());
-}
-
-function renderSumChart() {
-    const chart = echarts.init(document.getElementById("chartSum"));
-    const sumData = dashboardData.sum;
-    const dist = sumData.distribution;
-
-    chart.setOption({
-        tooltip: { trigger: "axis" },
-        xAxis: {
-            type: "category",
-            data: dist.map(d => d.range),
-            axisLabel: { color: "#94a3b8", rotate: 30 },
-            axisLine: { lineStyle: { color: "#334155" } }
-        },
-        yAxis: {
-            type: "value",
-            axisLabel: { color: "#94a3b8" },
-            splitLine: { lineStyle: { color: "#1e293b" } }
-        },
-        series: [{
-            type: "bar",
-            data: dist.map(d => d.count),
-            itemStyle: {
-                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    { offset: 0, color: "#8b5cf6" },
-                    { offset: 1, color: "#6d28d9" }
-                ])
-            },
-            barWidth: "60%"
-        }],
-        grid: { left: 40, right: 16, top: 16, bottom: 50 },
-        graphic: [{
-            type: "text",
-            left: "center", bottom: 60,
-            style: {
-                text: `均值: ${sumData.avg}  |  中位数: ${sumData.median}  |  范围: ${sumData.min}-${sumData.max}`,
-                fill: "#94a3b8", fontSize: 12
-            }
-        }]
-    });
-    window.addEventListener("resize", () => chart.resize());
-}
-
-function renderConsecutiveChart() {
-    const chart = echarts.init(document.getElementById("chartConsecutive"));
-    const con = dashboardData.consecutive;
-
-    chart.setOption({
-        tooltip: { trigger: "item" },
-        series: [{
-            type: "pie",
-            radius: ["45%", "70%"],
-            data: [
-                { name: "有连号", value: con.has_consecutive, itemStyle: { color: "#e94560" } },
-                { name: "无连号", value: con.no_consecutive, itemStyle: { color: "#334155" } },
-            ],
-            label: {
-                color: "#e2e8f0",
-                formatter: "{b}: {c}期 ({d}%)"
-            },
-        }],
-        graphic: [{
-            type: "text",
-            left: "center",
-            top: "center",
-            style: {
-                text: `${con.consecutive_rate}%`,
-                fill: "#e94560",
-                fontSize: 28,
-                fontWeight: "bold"
-            }
-        }]
-    });
-    window.addEventListener("resize", () => chart.resize());
-}
 
 // ==================== 特码 / 生肖专项统计 ====================
 
@@ -590,11 +443,138 @@ function renderSpecialFreqChart() {
     window.addEventListener("resize", () => chart.resize());
 }
 
+function renderSpecialMissingChart() {
+    // 特码遗漏排行：最久没开出的特码
+    const chart = echarts.init(document.getElementById("chartSpecialMissing"));
+    const s = (dashboardData.special_stats || {});
+    if (!s.most_missing) return;
+
+    // 倒序显示，让"遗漏最久"的排在最上面
+    const rows = s.most_missing.slice().reverse();
+    const names = rows.map(r => r.number + " 号");
+    const values = rows.map(r => r.missing);
+    const colors = rows.map(r => WAVE_COLORS[r.color] || "#334155");
+
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            axisPointer: { type: "shadow" },
+            formatter: p => {
+                const r = rows[p[0].dataIndex];
+                return `${r.number} 号（${r.color} / ${r.zodiac}）<br/>`
+                    + `已 ${r.missing} 期未开出<br/>`
+                    + `历史共开出 ${r.count} 次`;
+            }
+        },
+        xAxis: {
+            type: "value",
+            axisLabel: { color: "#94a3b8" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        yAxis: {
+            type: "category",
+            data: names,
+            axisLabel: { color: "#94a3b8", fontSize: 11 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        series: [{
+            type: "bar",
+            data: values.map((v, i) => ({ value: v, itemStyle: { color: colors[i] } })),
+            barWidth: "55%",
+            label: { show: true, position: "right", color: "#94a3b8", fontSize: 10 }
+        }],
+        grid: { left: 56, right: 40, top: 12, bottom: 28 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderMainNumbersChart() {
+    // 正码单号出现次数（猜正码玩法）
+    const chart = echarts.init(document.getElementById("chartMainNumbers"));
+    const m = (dashboardData.main_numbers || {});
+    if (!m.numbers) return;
+
+    const nums = m.numbers.map(r => r.number);
+    const values = m.numbers.map(r => r.count);
+    const colors = m.numbers.map(r => {
+        const attr = (dashboardData.attributes?.numbers || []).find(a => a.number === r.number);
+        return attr ? (WAVE_COLORS[attr.color] || "#334155") : "#334155";
+    });
+
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            formatter: p => {
+                const r = m.numbers[p[0].dataIndex];
+                return `${r.number} 号<br/>`
+                    + `出现 ${r.count} 次（占 ${r.pct}%）<br/>`
+                    + `理论期望 ${r.expected} 次，偏离 ${r.ratio} 倍<br/>`
+                    + `当前遗漏 ${r.missing} 期`;
+            }
+        },
+        xAxis: {
+            type: "category",
+            data: nums,
+            axisLabel: { color: "#94a3b8", fontSize: 10 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value",
+            axisLabel: { color: "#94a3b8" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: [{
+            type: "bar",
+            data: values.map((v, i) => ({ value: v, itemStyle: { color: colors[i] } })),
+            barWidth: "60%",
+            markLine: {
+                silent: true,
+                symbol: "none",
+                lineStyle: { color: "#f59e0b", type: "dashed", width: 1 },
+                label: { color: "#f59e0b", formatter: "期望 {c}", fontSize: 10 },
+                data: [{ yAxis: m.expected_per_number }]
+            }
+        }],
+        grid: { left: 46, right: 16, top: 16, bottom: 30 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderAttributesTable() {
+    // 号码属性速查表：生肖 / 波色 / 五行
+    const a = dashboardData.attributes;
+    if (!a || !a.numbers) return;
+
+    const note = document.getElementById("attributesNote");
+    if (note) {
+        note.innerHTML = `每个号码的生肖 / 波色 / 五行；按生肖或波色下注时用这张表对照。`
+            + `<br>当前生肖表：<b>${a.zodiac_lunar_year} 年（${a.zodiac_animal}年）</b>，`
+            + `自 ${a.zodiac_effective_from} 起生效 —— 生肖每年轮换，跨年号码归属会变。`;
+    }
+
+    const table = document.getElementById("attrTable");
+    // 表头：号码 / 生肖 / 波色 / 五行，按 1-49 分行
+    let html = "<thead><tr><th>号码</th><th>生肖</th><th>波色</th><th>五行</th>"
+        + "<th>奇偶</th><th>大小</th></tr></thead><tbody>";
+    a.numbers.forEach(r => {
+        const wave = WAVE_COLORS[r.color] || "#94a3b8";
+        html += `<tr>
+            <td class="attr-num">${r.number}</td>
+            <td>${r.zodiac}</td>
+            <td style="color:${wave}; font-weight:600;">${r.color}</td>
+            <td>${r.wuxing}</td>
+            <td>${r.odd_even}</td>
+            <td>${r.big_small}</td>
+        </tr>`;
+    });
+    html += "</tbody>";
+    table.innerHTML = html;
+}
+
 function renderSpecialColorChart() {
     const chart = echarts.init(document.getElementById("chartSpecialColor"));
     const s = (dashboardData.special_stats || {});
     if (!s.color) return;
-
     chart.setOption({
         tooltip: { trigger: "item" },
         legend: {
