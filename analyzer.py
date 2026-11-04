@@ -97,6 +97,144 @@ def missing_values(limit=None):
     return result
 
 
+def missing_leaderboard(top_k=10):
+    """
+    连续不出期数实时榜单（前 K 名）。
+
+    这是"追冷号"玩法的入口：列出当前最久没出的号码。
+    同时给出每个号码**在历史上处于相同遗漏档位时，下一期实际开出的概率**，
+    让用户自己判断"追冷号"值不值得。
+
+    注意：榜单本身只是排序，不含任何预测。冷热与下一期概率无关，
+    这一点由同档位的历史命中率直接体现（应恒为 ~14.29%）。
+    """
+    results = get_all_results()          # 降序：results[0] 最新
+    if not results:
+        return {"total_periods": 0, "board": []}
+
+    asc = list(reversed(results))
+    total = len(asc)
+
+    # 每个号码：当前遗漏 + 历史同档位命中率
+    rows = []
+    for n in NUM_RANGE:
+        seq = []
+        for r in asc:
+            hit = (n in [int(r[f"num{i}"]) for i in range(1, 7)]
+                   or int(r["special"]) == n)
+            seq.append(1 if hit else 0)
+
+        # 当前遗漏
+        cur = 0
+        for v in reversed(seq):
+            if v == 0:
+                cur += 1
+            else:
+                break
+
+        # 历史上"已连续未出 >= cur 期"时，下一期开出的次数
+        # （即：处在当前这种"很久没出"的状态下，下一期命中的历史频率）
+        same_tot = same_hit = 0
+        miss = 0
+        for v in seq:
+            if miss >= cur and cur > 0:
+                same_tot += 1
+                same_hit += v
+            if v == 0:
+                miss += 1
+            else:
+                miss = 0
+
+        rows.append({
+            "number": n,
+            "missing": cur,
+            # 历史同档位（遗漏 >= 当前值）时下一期的实际命中率
+            "same_state_rate": round(same_hit / same_tot * 100, 2) if same_tot >= 30 else None,
+            "same_state_samples": same_tot,
+            "total_hits": sum(seq),
+            "zodiac": zodiac_of_number(n, date.today()),
+            "color": COLOR_OF_NUMBER[n],
+        })
+
+    rows.sort(key=lambda x: (-x["missing"], x["number"]))
+    return {
+        "total_periods": total,
+        "latest_period": results[0]["period"],
+        "latest_date": results[0]["draw_date"],
+        "expected_rate": round(7 / 49 * 100, 2),
+        "board": rows[:top_k],
+        "all": rows,
+    }
+
+
+def cold_chase_backtest(top_k=10, min_missing=0, max_periods=None):
+    """
+    验证「追冷号」策略：每期押"当前最久没出的 K 个号"，看命中率。
+
+    与 smart_recommend 不同，这里不挑号码、不做任何优化，
+    就是**机械地照榜单下注**——目的正是检验这个直觉本身。
+
+    返回每期的命中情况与汇总命中率，和理论值 14.29% 对比。
+    """
+    results = get_all_results()          # 降序
+    if not results:
+        return {"periods": 0}
+
+    asc = list(reversed(results))
+    total = len(asc)
+    start = max(60, total - int(max_periods)) if max_periods else 60
+
+    hits = 0
+    played = 0
+    detail = []
+    for t in range(start, total):
+        # 用第 t 期**之前**的历史算遗漏（防未来数据泄露）
+        window = asc[:t]
+        missing = {}
+        for n in NUM_RANGE:
+            cur = 0
+            for r in reversed(window):
+                if (n in [int(r[f"num{i}"]) for i in range(1, 7)]
+                        or int(r["special"]) == n):
+                    break
+                cur += 1
+            missing[n] = cur
+
+        picks = sorted(missing, key=lambda n: (-missing[n], n))[:top_k]
+        picks = [n for n in picks if missing[n] >= min_missing]
+        if not picks:
+            continue
+
+        actual = asc[t]
+        drawn = set(int(actual[f"num{i}"]) for i in range(1, 7))
+        drawn.add(int(actual["special"]))
+
+        # 命中数：K 个号里有几个开出来了
+        hit_nums = [n for n in picks if n in drawn]
+        played += 1
+        hits += len(hit_nums)
+
+        if len(detail) < 200:
+            detail.append({
+                "period": actual["period"],
+                "date": actual["draw_date"],
+                "picks": picks,
+                "hits": hit_nums,
+            })
+
+    # 每期押 K 个号：命中数 / (期数 × K) 即单号命中率
+    rate = hits / (played * top_k) * 100 if played else 0
+    return {
+        "top_k": top_k,
+        "periods": played,
+        "total_bets": played * top_k,
+        "total_hits": hits,
+        "hit_rate": round(rate, 2),
+        "expected_rate": round(7 / 49 * 100, 2),
+        "detail": detail[-60:],
+    }
+
+
 def _histogram(values, bins=10):
     """生成直方图数据"""
     counts, edges = np.histogram(values, bins=bins)
