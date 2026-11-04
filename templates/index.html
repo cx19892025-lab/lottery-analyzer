@@ -18,6 +18,15 @@
         <div class="subtitle" id="dataInfo">加载中...</div>
     </header>
 
+    <!-- ==================== 数据过期提示条 ==================== -->
+    <!-- 只在「库内数据落后于应开日期」时显示；判定纯本地计算，不联网 -->
+    <div class="stale-bar" id="staleBar" style="display:none;">
+        <span class="stale-icon">⚠️</span>
+        <span class="stale-text" id="staleText"></span>
+        <button class="stale-btn" id="staleSyncBtn">🔄 立即同步</button>
+        <button class="stale-close" id="staleCloseBtn" title="本次不再提示">✕</button>
+    </div>
+
     <!-- ==================== 标签页 ==================== -->
     <nav class="tab-nav">
         <button class="tab-btn active" data-tab="dashboard">📊 数据仪表盘</button>

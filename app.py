@@ -20,7 +20,7 @@ from analyzer import (
 from backtest import run_backtest, STRATEGIES, MIN_HISTORY
 from decoder import get_all_categories, decode_elements, quick_decode
 from vision import analyze_image, map_vision_to_decoder_selections
-from crawler import import_all, sync_latest, data_status
+from crawler import import_all, sync_latest, data_status, data_freshness
 import settings as settings_mod
 
 # 打包成 exe 后，模板与静态文件在 PyInstaller 的解压目录里，
@@ -154,12 +154,6 @@ def api_attributes():
 
 # ==================== 数据管理 API ====================
 
-@app.route("/api/data/status")
-def api_data_status():
-    """本地开奖库概况（期数、最新期号/日期、数据源地址）"""
-    return jsonify(data_status())
-
-
 @app.route("/api/data/import", methods=["POST"])
 def api_data_import():
     """
@@ -178,6 +172,20 @@ def api_data_import():
             "hint": "请检查网络能否访问 raw.githubusercontent.com 与 renavon.com"
                     "（国内一般可直连，若失败可稍后重试或配置代理后重试）"
         }), 502
+
+
+@app.route("/api/data/status")
+def api_data_status():
+    """
+    数据状态。除库内期数外，附带 fresh 字段（新鲜度检查，纯本地计算不联网），
+    供前端在顶部提示"数据可能已过时"。
+    """
+    st = data_status()
+    try:
+        st["fresh"] = data_freshness()
+    except Exception as e:
+        st["fresh"] = {"known": False, "error": str(e)}
+    return jsonify(st)
 
 
 @app.route("/api/data/sync", methods=["POST"])
