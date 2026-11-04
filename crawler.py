@@ -31,7 +31,7 @@ import io
 import json
 
 from database import (
-    insert_result, insert_many, get_all_results,
+    insert_result, insert_many, get_all_results, get_raw_results,
     get_results_count, clear_results,
 )
 
@@ -300,7 +300,10 @@ def sync_latest():
         (skipped.append({"period": d["period"], "reason": reason}) if reason
          else valid.append(d))
 
-    existing = {r["period"] for r in get_all_results()}
+    # 用 get_raw_results：判断"期号是否已存在"必须看全部原始记录。
+    # 若用 get_all_results（已排除早期数据），1993~2002 的期号会被误判为"新期"，
+    # 导致每次同步都把 old periods 报成新增。
+    existing = {r["period"] for r in get_raw_results()}
     inserted = insert_many(valid)
     new_periods = sorted(d["period"] for d in valid if d["period"] not in existing)[-10:]
 

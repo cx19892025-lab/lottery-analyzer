@@ -10,7 +10,7 @@ import webbrowser
 
 from flask import Flask, render_template, jsonify, request
 from paths import resource_path, is_frozen, user_data_dir, ensure_user_data
-from database import init_db, get_all_results
+from database import init_db, get_all_results, get_raw_results, get_results_count
 from analyzer import (
     frequency_analysis, hot_cold_numbers, missing_values,
     main_number_stats, number_attributes, special_stats,
@@ -57,9 +57,14 @@ def api_dashboard():
 
 @app.route("/api/history")
 def api_history():
-    """历史开奖记录"""
+    """
+    历史开奖记录。
+
+    用 get_raw_results 而非 get_all_results：这里要展示**全部**原始记录，
+    包括 1993~2002 那段 48/49 号缺失的期（统计时会排除，但列表应如实呈现）。
+    """
     limit = request.args.get("limit", 50, type=int)
-    results = get_all_results(limit)
+    results = get_raw_results(limit)
     return jsonify(results)
 
 
