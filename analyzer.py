@@ -167,6 +167,108 @@ def missing_leaderboard(top_k=10):
     }
 
 
+def zodiac_missing_leaderboard(top_k=10):
+    """
+    生肖连续不出期数榜单 —— 正码与特码**分开统计**。
+
+    为什么要分开：
+      正码每期开 6 个，某个生肖出现的机会大得多（生肖通常含 4~5 个号码，
+      每期 6 个正码里几乎必然覆盖多个生肖）；
+      特码每期只开 1 个，某个生肖不出的概率高得多。
+      两者概率差一个数量级，混在一起算"连续不出"没有意义。
+
+    生肖表按**农历年**轮换，因此每期都用**该期自己的开奖日期**换算
+    （见 zodiac_of_number），不能拿今天的表套历史数据。
+
+    返回每个生肖的：
+      - 当前连续多少期没在正码 / 特码里出现
+      - 理论期望（该生肖号码数 × 每期位置数 / 49）
+      - 历史同档位命中率（处在同样久没出的状态时，下一期出现的频率）
+    """
+    results = get_all_results()
+    if not results:
+        return {"total_periods": 0, "main": [], "special": []}
+
+    asc = list(reversed(results))
+    total = len(asc)
+
+    # 每期每个生肖是否出现（正码 / 特码 分开）
+    main_seq = {a: [] for a in ZODIAC_ORDER}
+    spec_seq = {a: [] for a in ZODIAC_ORDER}
+    # 该生肖当期的号码数（生肖表随年份变化，号码数可能不同）
+    zodiac_size = {a: 0 for a in ZODIAC_ORDER}
+
+    for r in asc:
+        d = date.fromisoformat(r["draw_date"])
+        main_z = set(zodiac_of_number(int(r[f"num{i}"]), d) for i in range(1, 7))
+        spec_z = zodiac_of_number(int(r["special"]), d)
+        for a in ZODIAC_ORDER:
+            main_seq[a].append(1 if a in main_z else 0)
+            spec_seq[a].append(1 if a == spec_z else 0)
+
+    # 用最后一期的生肖表统计各生肖号码数（用于算期望）
+    last_d = date.fromisoformat(results[0]["draw_date"])
+    from decoder import get_zodiac_map
+    zmap = get_zodiac_map(last_d)
+    for a in ZODIAC_ORDER:
+        zodiac_size[a] = len(zmap.get(a, []))
+
+    def build(seq_map, positions, label):
+        rows = []
+        for a in ZODIAC_ORDER:
+            seq = seq_map[a]
+            # 当前连续未出
+            cur = 0
+            for v in reversed(seq):
+                if v == 0:
+                    cur += 1
+                else:
+                    break
+
+            # 历史同档位命中率（遗漏 >= 当前值时，下一期出现频率）
+            same_tot = same_hit = 0
+            miss = 0
+            for v in seq:
+                if cur > 0 and miss >= cur:
+                    same_tot += 1
+                    same_hit += v
+                miss = miss + 1 if v == 0 else 0
+
+            # 理论单期出现概率：该生肖号码数 × 位置数 / 49
+            p_theory = zodiac_size[a] * positions / 49
+
+            rows.append({
+                "zodiac": a,
+                "missing": cur,
+                "numbers": zodiac_size[a],
+                "expected_pct": round(p_theory * 100, 2),
+                # 历史同档位命中率：衡量"欠久了会不会补"
+                "same_state_rate": (round(same_hit / same_tot * 100, 2)
+                                    if same_tot >= 30 else None),
+                "same_state_samples": same_tot,
+                "total_hits": sum(seq),
+                "expected_hits": round(total * p_theory, 1),
+            })
+
+        rows.sort(key=lambda x: (-x["missing"], x["zodiac"]))
+        return rows
+
+    main_rows = build(main_seq, 6, "正码")
+    spec_rows = build(spec_seq, 1, "特码")
+
+    return {
+        "total_periods": total,
+        "latest_period": results[0]["period"],
+        "latest_date": results[0]["draw_date"],
+        "zodiac_size": zodiac_size,
+        "main": main_rows,
+        "special": spec_rows,
+        "main_top": main_rows[:top_k],
+        "special_top": spec_rows[:top_k],
+    }
+
+
+
 def cold_chase_backtest(top_k=10, min_missing=0, max_periods=None):
     """
     验证「追冷号」策略：每期押"当前最久没出的 K 个号"，看命中率。

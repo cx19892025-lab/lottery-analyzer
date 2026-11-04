@@ -133,7 +133,11 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
         if (btn.dataset.tab === "decoder") loadDecoderCategories();
         if (btn.dataset.tab === "backtest") loadBacktestTab();
         if (btn.dataset.tab === "tracker") initTracker();
-        if (btn.dataset.tab === "recommend" && !boardLoaded) loadMissingBoard();
+        if (btn.dataset.tab === "recommend" && !boardLoaded) {
+            loadZodiacBoard();
+            loadMissingBoard();
+            boardLoaded = true;
+        }
         if (btn.dataset.tab === "settings") { loadSettings(); loadDataStatus(); }
     });
 });
@@ -149,6 +153,18 @@ document.addEventListener("DOMContentLoaded", () => {
     if (rb) rb.addEventListener("click", loadMissingBoard);
     const cb = document.getElementById("chaseRunBtn");
     if (cb) cb.addEventListener("click", runColdChase);
+
+    // 生肖榜单：正码 / 特码 切换
+    const zr = document.getElementById("zodiacRefreshBtn");
+    if (zr) zr.addEventListener("click", loadZodiacBoard);
+    document.querySelectorAll(".zbtn").forEach(b => {
+        b.addEventListener("click", () => {
+            document.querySelectorAll(".zbtn").forEach(x => x.classList.remove("active"));
+            b.classList.add("active");
+            zodiacKind = b.dataset.zkind;
+            renderZodiacBoard();
+        });
+    });
 });
 
 // ==================== 仪表盘 ====================
@@ -733,6 +749,69 @@ document.querySelectorAll(".strategy-btn").forEach(btn => {
         currentStrategy = btn.dataset.strategy;
     });
 });
+
+// ==================== 生肖连续不出榜单 ====================
+let zodiacData = null;
+let zodiacKind = "special";
+
+async function loadZodiacBoard() {
+    const btn = document.getElementById("zodiacRefreshBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "刷新中..."; }
+    try {
+        const res = await fetch("/api/zodiac_board?top=10");
+        zodiacData = await res.json();
+        renderZodiacBoard();
+    } catch (e) {
+        document.getElementById("zodiacMeta").textContent = `加载失败：${e.message}`;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "🔄 刷新"; }
+    }
+}
+
+function renderZodiacBoard() {
+    if (!zodiacData) return;
+    const isSpecial = zodiacKind === "special";
+    const rows = isSpecial ? zodiacData.special_top : zodiacData.main_top;
+
+    document.getElementById("zodiacMeta").innerHTML =
+        `截至 <b>${zodiacData.latest_period}</b>（${zodiacData.latest_date}），`
+        + `统计 ${zodiacData.total_periods} 期`;
+
+    let html = `<thead><tr>
+        <th>名次</th><th>生肖</th><th>含号码数</th><th>已连续未出</th>
+        <th>理论单期概率</th><th>同档位历史命中率</th><th>样本</th></tr></thead><tbody>`;
+
+    rows.forEach((r, i) => {
+        let rateCell = "样本不足";
+        if (r.same_state_rate !== null) {
+            const diff = r.same_state_rate - r.expected_pct;
+            const tone = Math.abs(diff) < 2 ? "#94a3b8"
+                : (diff > 0 ? "#ef4444" : "#3b82f6");
+            rateCell = `<span style="color:${tone}">${r.same_state_rate}%</span>`
+                + `<span style="font-size:11px;color:#64748b"> (${diff >= 0 ? "+" : ""}${diff.toFixed(1)}pp)</span>`;
+        }
+        const medal = ["🥇", "🥈", "🥉"][i] || (i + 1);
+        html += `<tr>
+            <td>${medal}</td>
+            <td class="board-num">${r.zodiac}</td>
+            <td style="color:#64748b">${r.numbers}</td>
+            <td><b>${r.missing}</b> 期</td>
+            <td style="color:#64748b">${r.expected_pct}%</td>
+            <td>${rateCell}</td>
+            <td style="color:#64748b">${r.same_state_samples}</td>
+        </tr>`;
+    });
+    html += "</tbody>";
+    document.getElementById("zodiacTable").innerHTML = html;
+
+    // 口径说明：两种玩法的量级完全不同，明确提示避免误读
+    const top = rows[0];
+    document.getElementById("zodiacHint").innerHTML = isSpecial
+        ? `特码每期只开 1 个，12 个生肖里 11 个不出，所以「连续 ${top.missing} 期未出」并不稀奇——
+           理论单期出现概率约 8~10%，意味着<b>平均 10 期左右才轮到一次</b>。`
+        : `正码每期开 6 个，覆盖多个生肖，所以「连续不出」通常只有 <b>几期</b>——
+           理论单期出现概率约 49~61%，意味着<b>平均两期就会出现一次</b>。`;
+}
 
 // ==================== 连续不出实时榜单 ====================
 let boardLoaded = false;

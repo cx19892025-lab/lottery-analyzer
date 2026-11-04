@@ -1361,3 +1361,32 @@ body {
     font-size: 13px;
     color: var(--text-primary, #e2e8f0);
 }
+
+/* 生肖榜单：正码/特码 切换按钮 */
+.zodiac-switch {
+    display: inline-flex;
+    gap: 0;
+    border-radius: 7px;
+    overflow: hidden;
+    border: 1px solid var(--border-color, #334155);
+}
+
+.zbtn {
+    padding: 6px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.zbtn:hover {
+    color: #0ea5e9;
+}
+
+.zbtn.active {
+    background: #0ea5e9;
+    color: #fff;
+    font-weight: 600;
+}
