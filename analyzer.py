@@ -492,6 +492,223 @@ def smart_recommend(strategy="balanced", limit=None, recent_n=30):
         }
 
 
+def number_tracker(number, limit=None):
+    """
+    单个号码的跟踪分析 —— 回答"它多久没出了，还该不该等"。
+
+    用户关心的核心问题：「连续 N 期没出，是不是快出了？」
+    这个函数同时给出**两个视角**，正是这个问题的两面：
+
+      视角一（单期独立）：下一期出的概率恒为 7/49 = 14.29%，
+                        与已遗漏多少期**无关**。
+      视角二（打包未来）：未来 K 期内至少出一次的概率随 K 增大而升高，
+                        这才是"迟早会出"的真实来源。
+
+    再叠加**年度分布**：每号每年的出现次数应落在理论区间内，
+    用来判断"今年这个号偏少"是否属于正常波动。
+
+    返回结构见下方 return。
+    """
+    import math
+
+    results = get_all_results(limit)
+    total = len(results)
+    if total == 0 or not (1 <= number <= 49):
+        return {}
+
+    # ---------- 1. 出现序列（按期号升序，便于算遗漏） ----------
+    asc = list(reversed(results))
+    seq = []
+    for r in asc:
+        hit = (number in [int(r[f"num{i}"]) for i in range(1, 7)]
+               or int(r["special"]) == number)
+        seq.append(1 if hit else 0)
+
+    total_hits = sum(seq)
+    p = 7 / 49
+
+    # ---------- 2. 当前遗漏 ----------
+    current_missing = 0
+    for v in reversed(seq):
+        if v == 0:
+            current_missing += 1
+        else:
+            break
+
+    # ---------- 3. 历史遗漏段（把"连续不出"当整体看） ----------
+    runs = []
+    cur = 0
+    for v in seq:
+        if v == 0:
+            cur += 1
+        else:
+            if cur > 0:
+                runs.append(cur)
+            cur = 0
+    if cur > 0:
+        runs.append(cur)
+
+    runs_sorted = sorted(runs)
+    longest = max(runs) if runs else 0
+    # 当前这段在历史中处于什么水平（百分位）
+    pct = (sum(1 for r in runs if r <= current_missing) / len(runs) * 100) if runs else 0
+
+    # ---------- 4. 续期概率曲线：已遗漏 k 期 → 下一期仍不出 ----------
+    # 理论恒为 q；实际值由数据统计得出，供对照
+    q = 1 - p
+    bucket_tot = Counter()
+    bucket_cont = Counter()
+    miss = 0
+    for v in seq:
+        bucket_tot[miss] += 1
+        if v == 0:
+            bucket_cont[miss] += 1
+            miss += 1
+        else:
+            miss = 0
+
+    renew_curve = []
+    for k in range(0, min(41, longest + 1)):
+        t = bucket_tot.get(k, 0)
+        if t >= 30:
+            renew_curve.append({
+                "missing": k,
+                "observed": round(bucket_cont[k] / t, 4),
+                "theory": round(q, 4),
+                "samples": t,
+            })
+
+    # ---------- 5. "未来 K 期内至少出一次" ----------
+    horizon = []
+    for k in [1, 5, 10, 20, 30, 50, 100]:
+        horizon.append({
+            "periods": k,
+            "prob": round((1 - q ** k) * 100, 4),
+        })
+
+    # ---------- 6. 年度分布 ----------
+    by_year = {}
+    for r in asc:
+        by_year.setdefault(r["draw_date"][:4], []).append(r)
+
+    yearly = []
+    for y in sorted(by_year):
+        rs = by_year[y]
+        n = len(rs)
+        if n < 20:
+            continue
+        cnt = 0
+        for r in rs:
+            if (number in [int(r[f"num{i}"]) for i in range(1, 7)]
+                    or int(r["special"]) == number):
+                cnt += 1
+        exp = n * p
+        sd = math.sqrt(n * p * q)
+        yearly.append({
+            "year": y,
+            "periods": n,
+            "count": cnt,
+            "expected": round(exp, 1),
+            "lo": round(max(0, exp - 1.96 * sd), 1),
+            "hi": round(exp + 1.96 * sd, 1),
+            # 是否落在 95% 正常波动区间内
+            "normal": (exp - 1.96 * sd) <= cnt <= (exp + 1.96 * sd),
+        })
+
+    # ---------- 7. 续期曲线的合并版本（样本更多，线更稳） ----------
+    # 单档样本太少时（默认窗口 500 期，每档只有几十个），曲线会剧烈抖动，
+    # 反而看不出"平线"这个关键结论。这里把相邻档位合并成更大的桶。
+    #
+    # 注意：续期曲线必须用**全历史**算，否则窗口一小就只剩两三个点，
+    # 根本画不出"平线"这个核心结论（而它恰恰是本功能最想展示的东西）。
+    q_tot = Counter()
+    q_cont = Counter()
+    q_miss = 0
+    for r in list(reversed(get_all_results())):
+        hit = (number in [int(r[f"num{i}"]) for i in range(1, 7)]
+               or int(r["special"]) == number)
+        q_tot[q_miss] += 1
+        if not hit:
+            q_cont[q_miss] += 1
+            q_miss += 1
+        else:
+            q_miss = 0
+
+    merged = []
+    step = 3
+    k = 0
+    while k <= max(q_tot) if q_tot else False:
+        t = sum(q_tot.get(i, 0) for i in range(k, k + step))
+        c_ = sum(q_cont.get(i, 0) for i in range(k, k + step))
+        if t >= 100:
+            merged.append({
+                "missing": k,
+                "label": f"{k}-{k+step-1}",
+                "observed": round(c_ / t, 4),
+                "theory": round(q, 4),
+                "samples": t,
+            })
+        k += step
+
+    # 全历史单档（样本够大时也可展示）
+    renew_all = []
+    for k in sorted(q_tot):
+        if q_tot[k] >= 100:
+            renew_all.append({
+                "missing": k,
+                "observed": round(q_cont[k] / q_tot[k], 4),
+                "theory": round(q, 4),
+                "samples": q_tot[k],
+            })
+
+    # ---------- 8. 全历史年度分布（不受统计窗口限制） ----------
+    # "以一年为周期看波动"是长期问题，用全部历史才有意义。
+    all_results = get_all_results()
+    ay = {}
+    for r in all_results:
+        ay.setdefault(r["draw_date"][:4], []).append(r)
+    yearly_all = []
+    for y in sorted(ay):
+        rs = ay[y]
+        n = len(rs)
+        if n < 20:
+            continue
+        cnt = sum(1 for r in rs
+                  if number in [int(r[f"num{i}"]) for i in range(1, 7)]
+                  or int(r["special"]) == number)
+        exp = n * p
+        sd = math.sqrt(n * p * q)
+        yearly_all.append({
+            "year": y, "periods": n, "count": cnt,
+            "expected": round(exp, 1),
+            "lo": round(max(0, exp - 1.96 * sd), 1),
+            "hi": round(exp + 1.96 * sd, 1),
+            "normal": (exp - 1.96 * sd) <= cnt <= (exp + 1.96 * sd),
+        })
+
+    return {
+        "number": number,
+        "total_periods": total,
+        "total_hits": total_hits,
+        "expected_hits": round(total * p, 1),
+        "single_period_prob": round(p * 100, 2),      # 14.29%
+        "current_missing": current_missing,
+        # 当前遗漏在历史所有遗漏段中的百分位：越高说明"越久没出"
+        "missing_percentile": round(pct, 1),
+        "longest_missing": longest,
+        "avg_missing": round(sum(runs) / len(runs), 1) if runs else 0,
+        "runs_count": len(runs),
+        "renew_curve": renew_curve,
+        "renew_merged": merged,
+        "renew_all": renew_all,
+        "horizon": horizon,
+        "yearly": yearly,
+        "yearly_all": yearly_all,
+        "zodiac": zodiac_of_number(number, date.today()),
+        "color": COLOR_OF_NUMBER[number],
+    }
+
+
 def get_dashboard_data(window=500):
     """
     获取仪表盘汇总数据（一次性返回所有分析结果）

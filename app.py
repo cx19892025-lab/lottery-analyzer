@@ -14,7 +14,7 @@ from database import init_db, get_all_results, get_raw_results, get_results_coun
 from analyzer import (
     frequency_analysis, hot_cold_numbers, missing_values,
     main_number_stats, number_attributes, special_stats,
-    smart_recommend, get_dashboard_data
+    number_tracker, smart_recommend, get_dashboard_data
 )
 from backtest import run_backtest, STRATEGIES, MIN_HISTORY
 from decoder import get_all_categories, decode_elements, quick_decode
@@ -83,6 +83,19 @@ def api_special():
     """
     limit = request.args.get("limit", None, type=int)
     return jsonify(special_stats(limit))
+
+
+@app.route("/api/tracker")
+def api_tracker():
+    """
+    单号跟踪：当前遗漏、续期概率曲线、未来 K 期命中概率、年度分布。
+    number: 1-49；limit: 统计窗口（不传为全量）
+    """
+    number = request.args.get("number", 1, type=int)
+    limit = request.args.get("limit", None, type=int)
+    if not (1 <= number <= 49):
+        return jsonify({"error": "号码必须在 1-49 之间"}), 400
+    return jsonify(number_tracker(number, limit))
 
 
 @app.route("/api/hot_cold")

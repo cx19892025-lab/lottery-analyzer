@@ -132,6 +132,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
         if (btn.dataset.tab === "history") loadHistory();
         if (btn.dataset.tab === "decoder") loadDecoderCategories();
         if (btn.dataset.tab === "backtest") loadBacktestTab();
+        if (btn.dataset.tab === "tracker") initTracker();
         if (btn.dataset.tab === "settings") { loadSettings(); loadDataStatus(); }
     });
 });
@@ -1768,4 +1769,285 @@ async function syncLatestData() {
     } finally {
         btn.disabled = false;
     }
+}
+
+// ==================== 单号跟踪 ====================
+// 回答「它多久没出了，还该不该等」。
+// 关键是把两件事分开：
+//   下一期的概率  —— 恒为 14.29%，与遗漏多久无关
+//   未来K期的概率 —— 随 K 增大，这才是"迟早会出"的来源
+let trackerData = null;
+let trackerInited = false;
+
+function initTracker() {
+    if (trackerInited) return;
+    trackerInited = true;
+
+    // 号码下拉：1-49，用球色标记
+    const sel = document.getElementById("trackerNumber");
+    sel.innerHTML = Array.from({ length: 49 }, (_, i) => i + 1)
+        .map(n => `<option value="${n}">${n} 号</option>`).join("");
+    sel.value = "48";
+
+    document.getElementById("trackerRunBtn").addEventListener("click", loadTracker);
+    sel.addEventListener("change", loadTracker);
+    document.getElementById("trackerWindow").addEventListener("change", loadTracker);
+    loadTracker();
+}
+
+async function loadTracker() {
+    const num = document.getElementById("trackerNumber").value;
+    const win = document.getElementById("trackerWindow").value;
+    const btn = document.getElementById("trackerRunBtn");
+    btn.disabled = true;
+    btn.textContent = "计算中...";
+    try {
+        const res = await fetch(`/api/tracker?number=${num}&limit=${win}`);
+        trackerData = await res.json();
+        document.getElementById("trackerContent").style.display = "block";
+        renderTrackerCards();
+        renderRenewChart();
+        renderYearlyChart();
+        renderHorizonChart();
+        renderRunsChart();
+        renderTrackerHelp();
+    } catch (e) {
+        document.getElementById("trackerContent").style.display = "none";
+        alert(`跟踪失败：${e.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "开始跟踪";
+    }
+}
+
+function renderTrackerCards() {
+    const t = trackerData;
+    const n = t.number;
+    const color = WAVE_COLORS[t.color] || "#94a3b8";
+
+    // 当前遗漏在历史遗漏段里的位置：越高说明"这次等得越久"
+    const pctText = t.missing_percentile >= 90 ? "偏久"
+        : t.missing_percentile >= 70 ? "略久" : "常见范围";
+
+    document.getElementById("trackerCards").innerHTML = `
+        <div class="stat-card">
+            <div class="value" style="color:${color}">${n}</div>
+            <div class="label">${t.zodiac} · ${t.color}</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${t.current_missing}</div>
+            <div class="label">当前已连续未出（期）</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${t.missing_percentile}%</div>
+            <div class="label">比历史 ${t.runs_count} 次遗漏中多久（${pctText}）</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">${t.total_hits}</div>
+            <div class="label">窗口内出现次数（期望 ${t.expected_hits}）</div>
+        </div>
+        <div class="stat-card">
+            <div class="value">14.29%</div>
+            <div class="label">下一期出现概率（与遗漏无关）</div>
+        </div>
+    `;
+}
+
+function renderRenewChart() {
+    const chart = echarts.init(document.getElementById("chartRenew"));
+    // 用合并后的桶：单档样本太少会让线剧烈抖动，反而看不出"平线"这个结论
+    const c = trackerData.renew_merged || trackerData.renew_curve || [];
+    if (!c.length) return;
+
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            formatter: p => {
+                const r = c[p[0].dataIndex];
+                const range = r.label ? `已连续未出 ${r.label} 期` : `已连续未出 ${r.missing} 期`;
+                return `${range}<br/>`
+                    + `下一期仍不出：实际 ${(r.observed * 100).toFixed(2)}%<br/>`
+                    + `理论值 ${(r.theory * 100).toFixed(2)}%（样本 ${r.samples}）`;
+            }
+        },
+        legend: { data: ["实际", "理论"], textStyle: { color: "#94a3b8" }, top: 0 },
+        xAxis: {
+            type: "category",
+            name: "已连续未出期数",
+            nameTextStyle: { color: "#94a3b8", fontSize: 10 },
+            data: c.map(r => r.missing),
+            axisLabel: { color: "#94a3b8", fontSize: 10 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value",
+            min: 60, max: 100,
+            axisLabel: { color: "#94a3b8", formatter: "{value}%" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: [
+            {
+                name: "实际", type: "line", smooth: true, symbolSize: 6,
+                data: c.map(r => +(r.observed * 100).toFixed(2)),
+                itemStyle: { color: "#0ea5e9" }, lineStyle: { width: 2 }
+            },
+            {
+                name: "理论", type: "line", symbol: "none",
+                data: c.map(() => 85.71),
+                itemStyle: { color: "#f59e0b" },
+                lineStyle: { type: "dashed", width: 1 }
+            }
+        ],
+        grid: { left: 52, right: 16, top: 30, bottom: 42 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderYearlyChart() {
+    const chart = echarts.init(document.getElementById("chartYearly"));
+    // 用全历史年度数据：只看统计窗口的话期数太少（500 期仅约 3 年）
+    const y = trackerData.yearly_all || trackerData.yearly || [];
+    if (!y.length) return;
+
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            formatter: p => {
+                const r = y[p[0].dataIndex];
+                return `${r.year} 年（${r.periods} 期）<br/>`
+                    + `出现 ${r.count} 次<br/>`
+                    + `正常区间 ${r.lo} ~ ${r.hi}${r.normal ? "" : "（区间外）"}`;
+            }
+        },
+        xAxis: {
+            type: "category",
+            data: y.map(r => r.year),
+            axisLabel: { color: "#94a3b8", fontSize: 10, rotate: 45 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value",
+            axisLabel: { color: "#94a3b8" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: [
+            {
+                name: "出现次数", type: "bar", barWidth: "55%",
+                data: y.map(r => ({
+                    value: r.count,
+                    itemStyle: { color: r.normal ? "#0ea5e9" : "#ef4444" }
+                }))
+            },
+            {
+                // 95% 正常波动区间：用两条线夹出灰带
+                name: "上界", type: "line", symbol: "none", stack: "band",
+                data: y.map(r => r.hi - r.lo),
+                lineStyle: { opacity: 0 }, itemStyle: { opacity: 0 },
+                areaStyle: { color: "rgba(148,163,184,0.18)" }, silent: true,
+                tooltip: { show: false }
+            },
+            {
+                name: "下界", type: "line", symbol: "none",
+                data: y.map(r => r.lo),
+                lineStyle: { opacity: 0 }, itemStyle: { opacity: 0 },
+                silent: true, tooltip: { show: false }
+            }
+        ],
+        grid: { left: 44, right: 16, top: 16, bottom: 52 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderHorizonChart() {
+    const chart = echarts.init(document.getElementById("chartHorizon"));
+    const h = trackerData.horizon || [];
+    if (!h.length) return;
+
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            formatter: p => `未来 ${h[p[0].dataIndex].periods} 期内`
+                + `<br/>至少出现一次：${h[p[0].dataIndex].prob}%`
+        },
+        xAxis: {
+            type: "category",
+            data: h.map(r => r.periods + " 期"),
+            axisLabel: { color: "#94a3b8", fontSize: 10 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value", max: 100,
+            axisLabel: { color: "#94a3b8", formatter: "{value}%" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: [{
+            type: "bar", barWidth: "50%",
+            data: h.map(r => r.prob),
+            itemStyle: { color: "#22c55e" },
+            label: { show: true, position: "top", color: "#94a3b8", fontSize: 10,
+                     formatter: p => p.value + "%" }
+        }],
+        grid: { left: 52, right: 16, top: 24, bottom: 30 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderRunsChart() {
+    const chart = echarts.init(document.getElementById("chartRuns"));
+    // 用全量单档数据：这张图看的就是"长度分布"，合并会失真
+    const c = trackerData.renew_curve || [];
+    if (!c.length) return;
+
+    // 用样本量近似展示"遗漏段的长度分布"：每档的样本数即到达该长度的次数
+    chart.setOption({
+        tooltip: {
+            trigger: "axis",
+            formatter: p => `连续未出 ${c[p[0].dataIndex].missing} 期`
+                + `<br/>出现 ${p[0].value} 次`
+        },
+        xAxis: {
+            type: "category",
+            name: "连续未出长度（期）",
+            nameTextStyle: { color: "#94a3b8", fontSize: 10 },
+            data: c.map(r => r.missing),
+            axisLabel: { color: "#94a3b8", fontSize: 10 },
+            axisLine: { lineStyle: { color: "#334155" } }
+        },
+        yAxis: {
+            type: "value", name: "次数",
+            nameTextStyle: { color: "#94a3b8", fontSize: 10 },
+            axisLabel: { color: "#94a3b8" },
+            splitLine: { lineStyle: { color: "#1e293b" } }
+        },
+        series: [{
+            type: "bar", barWidth: "60%",
+            data: c.map(r => r.samples),
+            itemStyle: { color: "#a855f7" }
+        }],
+        grid: { left: 52, right: 16, top: 28, bottom: 42 },
+    });
+    window.addEventListener("resize", () => chart.resize());
+}
+
+function renderTrackerHelp() {
+    const t = trackerData;
+    document.getElementById("trackerHelp").innerHTML = `
+        <p><b>1. 下一期会不会出？</b>永远是 <b>14.29%</b>（7/49）。
+           不管它已经连续 ${t.current_missing} 期没出，还是刚刚出过，都是这个数。
+           看「续期概率」那张图——线是<b>平的</b>，就说明"欠久了会补"不成立。</p>
+        <p><b>2. 那"迟早会出"是假的吗？</b>不假，但它是<b>另一个问题</b>。
+           看「未来 K 期」那张图：10 期 78.6%、30 期 99.0%、50 期 99.96%。
+           期数越多越接近必然——靠的是<b>期数多</b>，不是对过去的补偿。</p>
+        <p><b>3. 年度次数波动正常吗？</b>正常。一年约 150 期，每号期望 21.4 次，
+           正常范围约 13~30 次。落到区间外也不必紧张——49 个号 × 20 多年，
+           按 5% 算本来就会有不少落在区间外。</p>
+        <p><b>4. 当前遗漏 ${t.current_missing} 期，算久吗？</b>
+           它比历史上 ${t.missing_percentile}% 的遗漏段更久
+           （历史最长 ${t.longest_missing} 期，平均 ${t.avg_missing} 期）。
+           ${t.missing_percentile >= 90
+              ? "确实偏久，但下一期概率不变——只是说明这类长遗漏本身会发生。"
+              : "属常见范围。"}</p>
+        <p class="tracker-caveat">⚠️ 这些图的价值是<b>让你看清规律</b>，不是预测。
+           每期独立、号码无记忆，任何"追冷号/追热号"的策略在数据上都不成立。</p>
+    `;
 }
