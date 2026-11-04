@@ -130,6 +130,25 @@ def _invalidate_cache():
     _result_cache = []
 
 
+# ============================================================================
+# 数据质量下限：期号早于该值的数据**号码缺失**，不能参与统计。
+#
+# 问题（2026-11 发现）：数据源 icelam 在 2002-07 之前只记录了 1~47 号，
+# 48/49 号被系统性漏掉。实测前 1013 期（1993-01 ~ 2002-07）里：
+#     48 号出现 0 次，49 号出现 1 次
+#     同期其他号码平均出现 150.9 次
+# 后果：48/49 号在"冷热号/遗漏排行/频率"里被严重低估，
+#      会出现"48 号最长连续 1013 期未出"这种荒谬结论
+#      （独立随机下 4404 期的理论最长遗漏仅约 66 期）。
+#
+# 从 2002053（2002-07-04）起 48/49 号分布恢复正常，故以该期为统计起点。
+#
+# 注意：这是**统计**下限，不是数据删除——原始记录仍完整保留，
+#      「开奖记录」页签照样能看到全部 4404 期。
+# ============================================================================
+STATS_MIN_PERIOD = "2002053"
+
+
 def get_all_results(limit=None, before_period=None):
     """
     获取开奖记录，按期号降序（带内存缓存，写操作自动失效）。
@@ -139,6 +158,9 @@ def get_all_results(limit=None, before_period=None):
 
     回测防泄露：由 set_history_cutoff() 设置的截止期号会自动生效，
     analyzer 里的统计函数无需感知。
+
+    **统计口径**：默认排除 STATS_MIN_PERIOD 之前的缺失数据。
+    需要完整原始记录（如"开奖记录"列表）时传 include_early=True。
     """
     global _result_cache
     if not _result_cache:
@@ -149,12 +171,31 @@ def get_all_results(limit=None, before_period=None):
 
     rows = _result_cache
 
+    # 数据质量下限：排除 48/49 号缺失的早期数据（见 STATS_MIN_PERIOD 说明）。
+    rows = [r for r in rows if r["period"] >= STATS_MIN_PERIOD]
+
     # 显式参数优先，其次用全局截止（回测时设置）
     cutoff = before_period if before_period is not None else _history_cutoff
     if cutoff is not None:
         rows = [r for r in rows if r["period"] < cutoff]
 
     return rows[:limit] if limit else rows
+
+
+def get_raw_results(limit=None):
+    """
+    取**完整**原始记录（不过滤数据质量下限），供"开奖记录"页签展示。
+
+    与 get_all_results 的区别：这里会返回 1993~2002 那些 48/49 号缺失的期，
+    因为用户看历史开奖时应该看到全部记录，而不是被统计口径悄悄砍掉。
+    """
+    global _result_cache
+    if not _result_cache:
+        conn = get_connection()
+        _result_cache = [dict(r) for r in conn.execute(
+            "SELECT * FROM lottery_results ORDER BY period DESC").fetchall()]
+        conn.close()
+    return _result_cache[:limit] if limit else _result_cache
 
 
 def get_results_count():

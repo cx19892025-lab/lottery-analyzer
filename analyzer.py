@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 from collections import Counter
 from datetime import date
-from database import get_all_results
+from database import get_all_results, get_raw_results, STATS_MIN_PERIOD
 from decoder import COLOR_MAP, ZODIAC_ORDER, zodiac_of_number
 
 NUM_RANGE = range(1, 50)  # 1-49
@@ -498,13 +498,21 @@ def get_dashboard_data(window=500):
 
     window: 统计窗口，只分析最近 N 期（真实数据 4400+ 期，全量统计太慢且
             远期号码对选号参考价值有限）。None/0 表示全量。
-    total_periods 始终返回库内全部期数，前端可区分"已加载"与"统计窗口"。
+
+    total_periods / stats_periods 的区别：
+      total_periods  库内**全部**原始期数（含 1993~2002 那段数据缺失期）
+      stats_periods  实际参与统计的期数（已排除缺失期）
+    前端据此提示用户"为什么统计基数小于总期数"。
 
     V1.6 起口径调整：玩法是猜**单个号码**（特码/正码），
     因此只保留单号维度统计，移除了和值/连号/奇偶比/大小比/尾数
     这些"7 个号码合起来"的形态统计。
+
+    V1.6.1：排除 STATS_MIN_PERIOD（2002053）之前的缺失数据，
+    否则 48/49 号会被严重低估（详见 database.STATS_MIN_PERIOD 说明）。
     """
     limit = int(window) if window else None
+    stats_rows = get_all_results()
     return {
         "window": limit,
         # —— 单号维度：整体频率与冷热（正码+特码混合，用于看全局）——
@@ -518,5 +526,8 @@ def get_dashboard_data(window=500):
         # —— 生肖 / 波色（按生肖、波色下注时的依据）——
         "main_zodiac": main_zodiac_stats(limit),
         "attributes": number_attributes(),
-        "total_periods": len(get_all_results()),
+        # 统计口径说明：前端用它提示"总期数 vs 参与统计期数"
+        "total_periods": len(get_raw_results()),
+        "stats_periods": len(stats_rows),
+        "stats_min_period": STATS_MIN_PERIOD,
     }

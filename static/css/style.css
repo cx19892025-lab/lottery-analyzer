@@ -1147,3 +1147,11 @@ body {
     font-weight: 700;
     color: #38bdf8;
 }
+
+/* 统计口径提示（早期数据缺失，已排除若干期） */
+.data-scope-note {
+    font-size: 12px;
+    color: #f59e0b;
+    border-bottom: 1px dotted #f59e0b;
+    cursor: help;
+}

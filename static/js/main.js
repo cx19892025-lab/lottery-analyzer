@@ -151,8 +151,17 @@ async function loadDashboard() {
         dashboardData = await res.json();
 
         const winText = dashboardData.window ? `近${dashboardData.window}期` : "全部数据";
-        document.getElementById("dataInfo").textContent =
-            `已加载 ${dashboardData.total_periods} 期数据，当前统计：${winText}`;
+        // 统计口径提示：1993~2002 的数据源缺失 48/49 号，
+        // 参与统计的期数会少于总期数，必须让用户知道为什么。
+        const skipped = (dashboardData.total_periods || 0) - (dashboardData.stats_periods || 0);
+        const scopeNote = skipped > 0
+            ? `<span class="data-scope-note" title="早期数据源缺失 48/49 号，已从统计中排除">`
+              + `统计基数 ${dashboardData.stats_periods} 期`
+              + `（已排除 ${skipped} 期数据不完整的记录）</span>`
+            : "";
+        document.getElementById("dataInfo").innerHTML =
+            `已加载 ${dashboardData.total_periods} 期数据，当前统计：${winText}`
+            + (scopeNote ? `　${scopeNote}` : "");
         document.getElementById("dashboardLoading").style.display = "none";
         document.getElementById("dashboardContent").style.display = "block";
 
