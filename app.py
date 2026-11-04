@@ -13,8 +13,7 @@ from paths import resource_path, is_frozen, user_data_dir, ensure_user_data
 from database import init_db, get_all_results
 from analyzer import (
     frequency_analysis, hot_cold_numbers, missing_values,
-    odd_even_analysis, big_small_analysis, sum_analysis,
-    tail_number_analysis, consecutive_analysis,
+    main_number_stats, number_attributes, special_stats,
     smart_recommend, get_dashboard_data
 )
 from backtest import run_backtest, STRATEGIES, MIN_HISTORY
@@ -71,6 +70,16 @@ def api_frequency():
     return jsonify(frequency_analysis(limit))
 
 
+@app.route("/api/special")
+def api_special():
+    """
+    特码专项统计（猜特码玩法，赔率最高）
+    limit: 统计窗口（最近 N 期），不传表示全量。
+    """
+    limit = request.args.get("limit", None, type=int)
+    return jsonify(special_stats(limit))
+
+
 @app.route("/api/hot_cold")
 def api_hot_cold():
     """冷热号"""
@@ -84,34 +93,16 @@ def api_missing():
     return jsonify(missing_values())
 
 
-@app.route("/api/odd_even")
-def api_odd_even():
-    """奇偶比"""
-    return jsonify(odd_even_analysis())
+@app.route("/api/main_numbers")
+def api_main_numbers():
+    """正码单号统计（猜正码玩法）"""
+    return jsonify(main_number_stats())
 
 
-@app.route("/api/big_small")
-def api_big_small():
-    """大小比"""
-    return jsonify(big_small_analysis())
-
-
-@app.route("/api/sum")
-def api_sum():
-    """和值分析"""
-    return jsonify(sum_analysis())
-
-
-@app.route("/api/tail")
-def api_tail():
-    """尾数分布"""
-    return jsonify(tail_number_analysis())
-
-
-@app.route("/api/consecutive")
-def api_consecutive():
-    """连号分析"""
-    return jsonify(consecutive_analysis())
+@app.route("/api/attributes")
+def api_attributes():
+    """号码属性表（生肖/波色/五行/奇偶/大小）"""
+    return jsonify(number_attributes())
 
 
 # ==================== 数据管理 API ====================

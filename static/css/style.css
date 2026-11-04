@@ -1087,3 +1087,63 @@ body {
     margin: -6px 0 8px;
     line-height: 1.4;
 }
+
+/* ==================== V1.6 仪表盘分区 ==================== */
+
+/* 分区标题：把仪表盘按"玩法"切开（特码 / 正码） */
+.section-divider {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 26px 0 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color, #1e293b);
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text-primary, #e2e8f0);
+}
+
+.section-divider .icon {
+    font-size: 19px;
+}
+
+.section-hint {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+/* 号码属性速查表 */
+.attr-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.attr-table th,
+.attr-table td {
+    padding: 7px 10px;
+    text-align: center;
+    border-bottom: 1px solid var(--border-color, #1e293b);
+    color: var(--text-primary, #e2e8f0);
+}
+
+.attr-table th {
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 12px;
+    position: sticky;
+    top: 0;
+    background: var(--card-bg, #1e293b);
+}
+
+.attr-table tbody tr:hover {
+    background: rgba(148, 163, 184, 0.08);
+}
+
+/* 号码列加粗，方便横向扫读 */
+.attr-table .attr-num {
+    font-weight: 700;
+    color: #38bdf8;
+}
