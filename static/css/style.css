@@ -1155,3 +1155,67 @@ body {
     border-bottom: 1px dotted #f59e0b;
     cursor: help;
 }
+
+/* ==================== V1.7 单号跟踪 ==================== */
+.tracker-controls {
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.tracker-controls label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.tracker-controls select {
+    padding: 7px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #334155);
+    background: var(--card-bg, #1e293b);
+    color: var(--text-primary, #e2e8f0);
+    font-size: 14px;
+    min-width: 120px;
+}
+
+.tracker-controls .btn-primary {
+    padding: 8px 20px;
+    border-radius: 6px;
+    border: none;
+    background: #0ea5e9;
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.tracker-controls .btn-primary:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* 解读说明区 */
+.tracker-help p {
+    margin: 0 0 10px;
+    font-size: 13px;
+    line-height: 1.75;
+    color: var(--text-primary, #e2e8f0);
+}
+
+.tracker-help b {
+    color: #38bdf8;
+}
+
+.tracker-caveat {
+    margin-top: 14px !important;
+    padding: 10px 12px;
+    border-left: 3px solid #f59e0b;
+    background: rgba(245, 158, 11, 0.08);
+    border-radius: 4px;
+    color: var(--text-secondary) !important;
+    font-size: 12.5px !important;
+}
