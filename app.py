@@ -14,7 +14,8 @@ from database import init_db, get_all_results, get_raw_results, get_results_coun
 from analyzer import (
     frequency_analysis, hot_cold_numbers, missing_values,
     main_number_stats, number_attributes, special_stats,
-    number_tracker, smart_recommend, get_dashboard_data
+    number_tracker, missing_leaderboard, cold_chase_backtest,
+    smart_recommend, get_dashboard_data
 )
 from backtest import run_backtest, STRATEGIES, MIN_HISTORY
 from decoder import get_all_categories, decode_elements, quick_decode
@@ -83,6 +84,24 @@ def api_special():
     """
     limit = request.args.get("limit", None, type=int)
     return jsonify(special_stats(limit))
+
+
+@app.route("/api/missing_board")
+def api_missing_board():
+    """连续不出期数实时榜单（追冷号玩法的入口）"""
+    top_k = request.args.get("top", 10, type=int)
+    return jsonify(missing_leaderboard(top_k))
+
+
+@app.route("/api/cold_chase")
+def api_cold_chase():
+    """
+    验证「追冷号」策略：机械地每期押当前最久没出的 K 个号，看命中率。
+    与理论值 14.29% 对比，供用户自己判断这个直觉靠不靠谱。
+    """
+    top_k = request.args.get("top", 10, type=int)
+    max_periods = request.args.get("max_periods", None, type=int)
+    return jsonify(cold_chase_backtest(top_k, max_periods=max_periods))
 
 
 @app.route("/api/tracker")

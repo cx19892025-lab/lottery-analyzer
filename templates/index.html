@@ -263,6 +263,53 @@
                     </button>
                 </div>
             </div>
+
+            <!-- ===== 连续不出实时榜单（追冷号） ===== -->
+            <div class="card">
+                <div class="card-title"><span class="icon">🧊</span> 连续不出期数 · 实时榜单（前10）</div>
+                <div class="chart-note">
+                    按「已连续多少期没出现」排序，每期开奖后自动刷新。
+                    「同档位历史命中率」= 该号码过去处在<b>同样久没出</b>的状态时，
+                    下一期实际开出的频率。
+                </div>
+                <div class="board-head">
+                    <span id="boardMeta" class="board-meta">加载中...</span>
+                    <button class="btn-mini" id="boardRefreshBtn">🔄 刷新</button>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="board-table" id="boardTable"></table>
+                </div>
+
+                <div class="board-verify">
+                    <div class="board-verify-title">
+                        <span class="icon">🧪</span> 验证这个策略：机械地每期押「最久没出的 K 个号」
+                    </div>
+                    <div class="chart-note">
+                        不做任何挑选，就照榜单下注。若"追冷号"真有效，
+                        命中率应显著高于理论值 14.29%。
+                    </div>
+                    <div class="board-verify-ctrl">
+                        <label>每期押
+                            <select id="chaseK">
+                                <option value="1">1 个号</option>
+                                <option value="3">3 个号</option>
+                                <option value="5" selected>5 个号</option>
+                                <option value="10">10 个号</option>
+                            </select>
+                        </label>
+                        <label>回测期数
+                            <select id="chasePeriods">
+                                <option value="500">近500期</option>
+                                <option value="1000" selected>近1000期</option>
+                                <option value="2000">近2000期</option>
+                                <option value="0">全部</option>
+                            </select>
+                        </label>
+                        <button class="btn-primary" id="chaseRunBtn">开始验证</button>
+                    </div>
+                    <div id="chaseResult" class="chase-result"></div>
+                </div>
+            </div>
         </div>
 
         <!-- ===== Tab: 策略回测 ===== -->

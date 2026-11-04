@@ -133,6 +133,7 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
         if (btn.dataset.tab === "decoder") loadDecoderCategories();
         if (btn.dataset.tab === "backtest") loadBacktestTab();
         if (btn.dataset.tab === "tracker") initTracker();
+        if (btn.dataset.tab === "recommend" && !boardLoaded) loadMissingBoard();
         if (btn.dataset.tab === "settings") { loadSettings(); loadDataStatus(); }
     });
 });
@@ -142,6 +143,12 @@ document.addEventListener("DOMContentLoaded", () => {
     loadDashboard();
     refreshAiStatus();   // 启动即探测 AI 是否已配置，用于图猜码页的降级提示
     loadDataStatus();    // 设置页数据管理区块的状态（惰性显示，切换到设置页时也会刷新）
+
+    // 连续不出榜单：进入选号页时加载，也可手动刷新
+    const rb = document.getElementById("boardRefreshBtn");
+    if (rb) rb.addEventListener("click", loadMissingBoard);
+    const cb = document.getElementById("chaseRunBtn");
+    if (cb) cb.addEventListener("click", runColdChase);
 });
 
 // ==================== 仪表盘 ====================
@@ -726,6 +733,116 @@ document.querySelectorAll(".strategy-btn").forEach(btn => {
         currentStrategy = btn.dataset.strategy;
     });
 });
+
+// ==================== 连续不出实时榜单 ====================
+let boardLoaded = false;
+
+async function loadMissingBoard() {
+    const btn = document.getElementById("boardRefreshBtn");
+    if (btn) { btn.disabled = true; btn.textContent = "刷新中..."; }
+    try {
+        const res = await fetch("/api/missing_board?top=10");
+        const d = await res.json();
+        renderMissingBoard(d);
+        boardLoaded = true;
+    } catch (e) {
+        document.getElementById("boardMeta").textContent = `加载失败：${e.message}`;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "🔄 刷新"; }
+    }
+}
+
+function renderMissingBoard(d) {
+    document.getElementById("boardMeta").innerHTML =
+        `截至 <b>${d.latest_period}</b>（${d.latest_date}），`
+        + `统计 ${d.total_periods} 期　理论命中率 ${d.expected_rate}%`;
+
+    let html = `<thead><tr>
+        <th>名次</th><th>号码</th><th>已连续未出</th><th>生肖</th><th>波色</th>
+        <th>同档位历史命中率</th><th>样本</th></tr></thead><tbody>`;
+
+    d.board.forEach((r, i) => {
+        const color = WAVE_COLORS[r.color] || "#94a3b8";
+        // 命中率与理论值对比：高于则偏红（提示"看起来更该出"），低于偏蓝
+        let rateCell = "样本不足";
+        if (r.same_state_rate !== null) {
+            const diff = r.same_state_rate - d.expected_rate;
+            const tone = Math.abs(diff) < 2 ? "#94a3b8"
+                : (diff > 0 ? "#ef4444" : "#3b82f6");
+            rateCell = `<span style="color:${tone}">${r.same_state_rate}%</span>`
+                + `<span style="font-size:11px;color:#64748b"> (${diff >= 0 ? "+" : ""}${diff.toFixed(1)}pp)</span>`;
+        }
+        const medal = ["🥇", "🥈", "🥉"][i] || (i + 1);
+        html += `<tr>
+            <td>${medal}</td>
+            <td class="board-num" style="color:${color}">${r.number}</td>
+            <td><b>${r.missing}</b> 期</td>
+            <td>${r.zodiac}</td>
+            <td style="color:${color}">${r.color}</td>
+            <td>${rateCell}</td>
+            <td style="color:#64748b">${r.same_state_samples}</td>
+        </tr>`;
+    });
+    html += "</tbody>";
+    document.getElementById("boardTable").innerHTML = html;
+}
+
+async function runColdChase() {
+    const k = document.getElementById("chaseK").value;
+    const mp = document.getElementById("chasePeriods").value;
+    const btn = document.getElementById("chaseRunBtn");
+    const box = document.getElementById("chaseResult");
+    btn.disabled = true;
+    btn.textContent = "验证中...";
+    box.innerHTML = '<div class="loading"><div class="spinner"></div> 回测中，期数多时较慢...</div>';
+    try {
+        const res = await fetch(`/api/cold_chase?top=${k}&max_periods=${mp}`);
+        const d = await res.json();
+        const diff = d.hit_rate - d.expected_rate;
+        const verdict = Math.abs(diff) < 1.0
+            ? { text: "与理论值无实质差异 —— 追冷号没有优势", color: "#94a3b8" }
+            : (diff > 0
+                ? { text: "略高于理论值，但需分段检验才知是否稳定", color: "#f59e0b" }
+                : { text: "低于理论值", color: "#3b82f6" });
+
+        box.innerHTML = `
+            <div class="chase-grid">
+                <div class="chase-cell">
+                    <div class="chase-val">${d.periods}</div>
+                    <div class="chase-lab">回测期数</div>
+                </div>
+                <div class="chase-cell">
+                    <div class="chase-val">${d.total_bets}</div>
+                    <div class="chase-lab">总投注数（每期 ${d.top_k} 个号）</div>
+                </div>
+                <div class="chase-cell">
+                    <div class="chase-val">${d.total_hits}</div>
+                    <div class="chase-lab">命中次数</div>
+                </div>
+                <div class="chase-cell">
+                    <div class="chase-val" style="color:${verdict.color}">${d.hit_rate}%</div>
+                    <div class="chase-lab">实际命中率</div>
+                </div>
+                <div class="chase-cell">
+                    <div class="chase-val">${d.expected_rate}%</div>
+                    <div class="chase-lab">理论命中率</div>
+                </div>
+                <div class="chase-cell">
+                    <div class="chase-val" style="color:${verdict.color}">${diff >= 0 ? "+" : ""}${diff.toFixed(2)}pp</div>
+                    <div class="chase-lab">差异</div>
+                </div>
+            </div>
+            <div class="chase-verdict" style="border-left-color:${verdict.color}">
+                ${verdict.text}
+            </div>
+        `;
+    } catch (e) {
+        box.innerHTML = `<span style="color:#ef4444">验证失败：${e.message}</span>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "开始验证";
+    }
+}
 
 async function generateNumbers() {
     const display = document.getElementById("recommendResult");
