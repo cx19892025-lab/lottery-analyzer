@@ -184,6 +184,9 @@ function renderStatCards() {
     const maxNum = Object.entries(freq).reduce((a, b) => b[1] > a[1] ? b : a);
     const minNum = Object.entries(freq).reduce((a, b) => b[1] < a[1] ? b : a);
 
+    // 顶部只放概览。期望值（每号平均次数）属于各图表的基准线，
+    // 已并入"特码号码频次"/"正码出现次数"两张图的 tooltip 与副标题，
+    // 不在这里重复展示。
     const html = `
         <div class="stat-card">
             <div class="value">${d.total_periods}</div>
@@ -196,14 +199,6 @@ function renderStatCards() {
         <div class="stat-card">
             <div class="value">${minNum[0]}</div>
             <div class="label">最低频号码 (${minNum[1]}次)</div>
-        </div>
-        <div class="stat-card">
-            <div class="value">${d.special_stats?.expected_per_number ?? "—"}</div>
-            <div class="label">特码每号期望次数</div>
-        </div>
-        <div class="stat-card">
-            <div class="value">${d.main_numbers?.expected_per_number ?? "—"}</div>
-            <div class="label">正码每号期望次数</div>
         </div>
     `;
     document.getElementById("statCards").innerHTML = html;
@@ -412,8 +407,13 @@ function renderSpecialFreqChart() {
     chart.setOption({
         tooltip: {
             trigger: "axis",
-            formatter: p => `${p[0].axisValue} 号<br/>开奖 ${p[0].value} 次`
-                + `（期望 ${s.expected_per_number}）`
+            formatter: p => {
+                const n = p[0].axisValue;
+                const c = s.frequency[n];
+                const ratio = (c / s.expected_per_number).toFixed(2);
+                return `${n} 号<br/>开奖 ${c} 次`
+                    + `<br/>每号平均 ${s.expected_per_number} 次（${ratio} 倍）`;
+            }
         },
         xAxis: {
             type: "category",
@@ -434,7 +434,7 @@ function renderSpecialFreqChart() {
                 silent: true,
                 symbol: "none",
                 lineStyle: { color: "#f59e0b", type: "dashed", width: 1 },
-                label: { color: "#f59e0b", formatter: "期望 {c}", fontSize: 10 },
+                label: { color: "#f59e0b", formatter: "每号平均 {c}", fontSize: 10 },
                 data: [{ yAxis: s.expected_per_number }]
             }
         }],
@@ -508,7 +508,7 @@ function renderMainNumbersChart() {
                 const r = m.numbers[p[0].dataIndex];
                 return `${r.number} 号<br/>`
                     + `出现 ${r.count} 次（占 ${r.pct}%）<br/>`
-                    + `理论期望 ${r.expected} 次，偏离 ${r.ratio} 倍<br/>`
+                    + `每号平均 ${r.expected} 次（${r.ratio} 倍）<br/>`
                     + `当前遗漏 ${r.missing} 期`;
             }
         },
@@ -531,7 +531,7 @@ function renderMainNumbersChart() {
                 silent: true,
                 symbol: "none",
                 lineStyle: { color: "#f59e0b", type: "dashed", width: 1 },
-                label: { color: "#f59e0b", formatter: "期望 {c}", fontSize: 10 },
+                label: { color: "#f59e0b", formatter: "每号平均 {c}", fontSize: 10 },
                 data: [{ yAxis: m.expected_per_number }]
             }
         }],
@@ -633,7 +633,7 @@ function renderSpecialZodiacChart() {
                 silent: true,
                 symbol: "none",
                 lineStyle: { color: "#f59e0b", type: "dashed", width: 1 },
-                label: { color: "#f59e0b", formatter: "期望 {c}", fontSize: 10 },
+                label: { color: "#f59e0b", formatter: "每号平均 {c}", fontSize: 10 },
                 data: [{ yAxis: Number(avg.toFixed(1)) }]
             }
         }],
@@ -655,7 +655,7 @@ function renderMainZodiacChart() {
             trigger: "axis",
             formatter: p => {
                 const a = p[0].axisValue;
-                return `${a}<br/>正码出现 ${p[0].value} 次（${m.pct[a]}%）<br/>期望 ${m.expected} 次`;
+                return `${a}<br/>正码出现 ${p[0].value} 次（${m.pct[a]}%）<br/>每号平均 ${m.expected} 次`;
             }
         },
         xAxis: {
@@ -680,7 +680,7 @@ function renderMainZodiacChart() {
                 silent: true,
                 symbol: "none",
                 lineStyle: { color: "#f59e0b", type: "dashed", width: 1 },
-                label: { color: "#f59e0b", formatter: "期望 {c}", fontSize: 10 },
+                label: { color: "#f59e0b", formatter: "每号平均 {c}", fontSize: 10 },
                 data: [{ yAxis: m.expected }]
             }
         }],
