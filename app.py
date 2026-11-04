@@ -14,8 +14,8 @@ from database import init_db, get_all_results, get_raw_results, get_results_coun
 from analyzer import (
     frequency_analysis, hot_cold_numbers, missing_values,
     main_number_stats, number_attributes, special_stats,
-    number_tracker, missing_leaderboard, cold_chase_backtest,
-    smart_recommend, get_dashboard_data
+    number_tracker, missing_leaderboard, zodiac_missing_leaderboard,
+    cold_chase_backtest, smart_recommend, get_dashboard_data
 )
 from backtest import run_backtest, STRATEGIES, MIN_HISTORY
 from decoder import get_all_categories, decode_elements, quick_decode
@@ -91,6 +91,16 @@ def api_missing_board():
     """连续不出期数实时榜单（追冷号玩法的入口）"""
     top_k = request.args.get("top", 10, type=int)
     return jsonify(missing_leaderboard(top_k))
+
+
+@app.route("/api/zodiac_board")
+def api_zodiac_board():
+    """
+    生肖连续不出榜单 —— 正码与特码分开统计。
+    两者每期开出的位置数不同（6 vs 1），概率差一个数量级，必须分开看。
+    """
+    top_k = request.args.get("top", 10, type=int)
+    return jsonify(zodiac_missing_leaderboard(top_k))
 
 
 @app.route("/api/cold_chase")

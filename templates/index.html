@@ -264,9 +264,31 @@
                 </div>
             </div>
 
+            <!-- ===== 生肖连续不出实时榜单 ===== -->
+            <div class="card">
+                <div class="card-title"><span class="icon">🐲</span> 生肖连续不出 · 实时榜单（前10）</div>
+                <div class="chart-note">
+                    正码与特码<b>分开统计</b>：正码每期开 6 个，生肖出现的机会大得多；
+                    特码每期只开 1 个，连续不出是常态。两者概率差一个数量级，混在一起看没有意义。
+                    生肖表按<b>农历年</b>轮换，每期用当期的表换算。
+                </div>
+                <div class="board-head">
+                    <div class="zodiac-switch">
+                        <button class="zbtn active" data-zkind="special">🎯 特码</button>
+                        <button class="zbtn" data-zkind="main">🎱 正码</button>
+                    </div>
+                    <span id="zodiacMeta" class="board-meta">加载中...</span>
+                    <button class="btn-mini" id="zodiacRefreshBtn">🔄 刷新</button>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="board-table" id="zodiacTable"></table>
+                </div>
+                <div class="chart-note" id="zodiacHint" style="margin-top:10px;"></div>
+            </div>
+
             <!-- ===== 连续不出实时榜单（追冷号） ===== -->
             <div class="card">
-                <div class="card-title"><span class="icon">🧊</span> 连续不出期数 · 实时榜单（前10）</div>
+                <div class="card-title"><span class="icon">🧊</span> 号码连续不出期数 · 实时榜单（前10）</div>
                 <div class="chart-note">
                     按「已连续多少期没出现」排序，每期开奖后自动刷新。
                     「同档位历史命中率」= 该号码过去处在<b>同样久没出</b>的状态时，
