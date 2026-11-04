@@ -1390,3 +1390,75 @@ body {
     color: #fff;
     font-weight: 600;
 }
+
+/* ==================== 数据过期提示条 ==================== */
+.stale-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 20px;
+    background: rgba(245, 158, 11, 0.12);
+    border-bottom: 1px solid rgba(245, 158, 11, 0.35);
+    font-size: 13px;
+    color: var(--text-primary, #e2e8f0);
+}
+
+.stale-bar .stale-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.stale-bar .stale-text {
+    flex: 1;
+    min-width: 200px;
+    line-height: 1.6;
+}
+
+.stale-bar .stale-text b {
+    color: #f59e0b;
+}
+
+.stale-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid #f59e0b;
+    background: rgba(245, 158, 11, 0.18);
+    color: #f59e0b;
+    font-size: 12.5px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.stale-btn:hover {
+    background: rgba(245, 158, 11, 0.3);
+}
+
+.stale-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.stale-link {
+    border: none;
+    background: none;
+    color: #38bdf8;
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 0;
+}
+
+.stale-close {
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    font-size: 15px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.stale-close:hover {
+    color: var(--text-primary, #e2e8f0);
+}

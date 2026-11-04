@@ -279,6 +279,66 @@ def import_all(clear=True):
     }
 
 
+def data_freshness():
+    """
+    数据新鲜度检查 —— 只读本地库，**不联网**。
+
+    用途：软件启动时判断"库里的数据是不是可能已经过时了"，
+    以便在界面顶部提示用户去同步，而不是让用户自己记得点。
+
+    为什么需要它：同步是手动触发的（有意设计，避免软件偷偷联网）。
+    但用户容易忘记点，看到旧数据却毫无察觉。
+
+    判断依据：香港六合彩固定**周二 / 周四 / 周六**开奖
+    （本项目 4404 期数据实测，各年均如此；偶有周日/周五的特别场次）。
+    从"库内最新一期"到"今天"之间，数一数有多少个应开日，
+    减去 1 天的宽限期（当晚 21:15 才截止投注、之后才开奖，
+    且数据源由 CI 每天更新一次，存在滞后）。
+
+    注意：**本函数不做任何网络请求**，纯本地计算。
+    它只能说"可能缺了 N 期"，无法确认那期究竟开没开
+    （历史上确实存在整期跳过的情况，见 DEVLOG V1.7.3）。
+    """
+    from datetime import date, timedelta
+
+    raw = get_raw_results()
+    if not raw:
+        return {"known": False, "stale": False}
+
+    latest_date = date.fromisoformat(raw[0]["draw_date"][:10])
+    today = date.today()
+    days_behind = (today - latest_date).days
+
+    # 数出 (latest_date, today] 之间落在 周二/四/六 的天数
+    DRAW_WEEKDAYS = (1, 3, 5)          # 周一=0
+    missed = []
+    cur = latest_date + timedelta(days=1)
+    while cur <= today:
+        if cur.weekday() in DRAW_WEEKDAYS:
+            missed.append(cur)
+        cur += timedelta(days=1)
+
+    # 宽限：最新一期开奖当晚数据源可能还没更新，留 1 天余量
+    GRACE_DAYS = 1
+    pending = [d for d in missed if (today - d).days > GRACE_DAYS]
+
+    return {
+        "known": True,
+        "latest_period": raw[0]["period"],
+        "latest_date": raw[0]["draw_date"][:10],
+        "today": today.isoformat(),
+        "days_behind": days_behind,
+        # stale：有超过宽限期的应开日没数据 → 值得提示用户同步
+        "stale": len(pending) > 0,
+        "missed_count": len(pending),
+        "missed_dates": [d.isoformat() for d in pending][-5:],
+        "missed_labels": [
+            f"{d.isoformat()}（周{'一二三四五六日'[d.weekday()]}）"
+            for d in pending
+        ][-5:],
+    }
+
+
 def sync_latest():
     """
     增量同步：拉取两个增量源（Renavon 优先、marksix-rd 兜底），

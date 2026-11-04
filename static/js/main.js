@@ -147,6 +147,7 @@ document.addEventListener("DOMContentLoaded", () => {
     loadDashboard();
     refreshAiStatus();   // 启动即探测 AI 是否已配置，用于图猜码页的降级提示
     loadDataStatus();    // 设置页数据管理区块的状态（惰性显示，切换到设置页时也会刷新）
+    initStaleBar();      // 顶部数据过期提示条的按钮绑定
 
     // 连续不出榜单：进入选号页时加载，也可手动刷新
     const rb = document.getElementById("boardRefreshBtn");
@@ -1901,10 +1902,73 @@ async function loadDataStatus() {
             el.innerHTML = `当前库内 <b>${d.total_periods}</b> 期，最新：第 ${d.latest_period} 期（${d.latest_date}）`;
             el.style.color = "";
         }
+        // 顺带刷新顶部过期提示（status 接口已带 fresh 字段，无需额外请求）
+        renderStaleBar(d.fresh);
     } catch (e) {
         el.textContent = `读取状态失败：${e.message}`;
         el.style.color = "#ef4444";
     }
+}
+
+// ==================== 数据过期提示条 ====================
+// 同步是手动的（有意不自动联网），但用户容易忘记点、看到旧数据却无察觉。
+// 这里做纯本地的「应开日 vs 库内最新」比对，落后了就提示一次。
+let staleDismissed = false;
+
+function renderStaleBar(fresh) {
+    const bar = document.getElementById("staleBar");
+    if (!bar) return;
+    if (!fresh || !fresh.known || !fresh.stale || staleDismissed) {
+        bar.style.display = "none";
+        return;
+    }
+    const dates = (fresh.missed_labels || []).join("、");
+    document.getElementById("staleText").innerHTML =
+        `数据可能已过时：库内最新为 <b>${fresh.latest_date}</b>，`
+        + `其后应有 <b>${fresh.missed_count}</b> 期开奖尚未收录`
+        + (dates ? `（${dates}）` : "")
+        + `　<button class="stale-link" id="staleLink">前往同步</button>`;
+    bar.style.display = "flex";
+
+    const link = document.getElementById("staleLink");
+    if (link) link.addEventListener("click", () => {
+        document.querySelector('.tab-btn[data-tab="settings"]').click();
+    });
+}
+
+function initStaleBar() {
+    const syncBtn = document.getElementById("staleSyncBtn");
+    const closeBtn = document.getElementById("staleCloseBtn");
+    if (syncBtn) syncBtn.addEventListener("click", async () => {
+        syncBtn.disabled = true;
+        syncBtn.textContent = "同步中...";
+        try {
+            const res = await fetch("/api/data/sync", { method: "POST" });
+            const d = await res.json();
+            if (d.inserted > 0) {
+                staleDismissed = true;
+                document.getElementById("staleBar").style.display = "none";
+                loadDashboard();
+                loadDataStatus();
+                alert(`同步完成，新增 ${d.inserted} 期：${(d.new_periods || []).join("、")}`);
+            } else {
+                // 源里确实还没有新数据 —— 提示但不重复骚扰
+                document.getElementById("staleText").innerHTML =
+                    `已检查数据源：暂无新期号（库内最新仍为 <b>${d.total_periods}</b> 期对应的最新一期）。`
+                    + `可能是该期未开奖或源尚未收录，稍后再试。`;
+                syncBtn.style.display = "none";
+            }
+        } catch (e) {
+            document.getElementById("staleText").textContent = `同步失败：${e.message}`;
+        } finally {
+            syncBtn.disabled = false;
+            if (syncBtn.style.display !== "none") syncBtn.textContent = "🔄 立即同步";
+        }
+    });
+    if (closeBtn) closeBtn.addEventListener("click", () => {
+        staleDismissed = true;      // 本次会话不再提示
+        document.getElementById("staleBar").style.display = "none";
+    });
 }
 
 async function importRealData() {
