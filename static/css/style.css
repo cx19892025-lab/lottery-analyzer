@@ -1462,3 +1462,17 @@ body {
 .stale-close:hover {
     color: var(--text-primary, #e2e8f0);
 }
+
+/* 回测表格：表头第二行小字说明 */
+.history-table .th-sub {
+    font-size: 10px;
+    font-weight: 400;
+    color: #64748b;
+}
+
+/* 回测表格表尾判读口径 */
+.history-table tfoot td {
+    border-bottom: none;
+    background: rgba(148, 163, 184, 0.05);
+    border-radius: 6px;
+}

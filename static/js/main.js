@@ -133,10 +133,13 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
         if (btn.dataset.tab === "decoder") loadDecoderCategories();
         if (btn.dataset.tab === "backtest") loadBacktestTab();
         if (btn.dataset.tab === "tracker") initTracker();
-        if (btn.dataset.tab === "recommend" && !boardLoaded) {
+        if (btn.dataset.tab === "recommend") {
+            // 每次都重新拉取：连续不出榜单是"实时"数据，
+            // 用户同步过新数据后再进来必须看到最新结果。
+            // （早期用 boardLoaded 只加载一次，导致榜单永远停在首次进入时的状态）
             loadZodiacBoard();
             loadMissingBoard();
-            boardLoaded = true;
+            boardsStale = false;
         }
         if (btn.dataset.tab === "settings") { loadSettings(); loadDataStatus(); }
     });
@@ -167,6 +170,29 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 });
+
+// ==================== 数据变化后的统一刷新 ====================
+// 同步/导入新数据后调用。凡是"依赖库内数据"的视图都要跟着更新，
+// 否则用户会看到旧榜单（历史上就漏了连续不出榜单，只能手动点刷新）。
+let boardsStale = false;   // 数据变了但选号页不可见，留待下次进入时补刷
+
+function refreshDataViews() {
+    loadDashboard();
+    loadDataStatus();
+    // 榜单只在对应标签页可见时才刷，避免无谓请求
+    const rec = document.querySelector('.tab-btn[data-tab="recommend"]');
+    if (rec && rec.classList.contains("active")) {
+        loadZodiacBoard();
+        loadMissingBoard();
+    } else {
+        boardsStale = true;     // 下次进入选号页时补刷
+    }
+    // 跟踪页同理
+    const trk = document.querySelector('.tab-btn[data-tab="tracker"]');
+    if (trk && trk.classList.contains("active") && trackerInited) {
+        loadTracker();
+    }
+}
 
 // ==================== 仪表盘 ====================
 async function loadDashboard() {
@@ -815,8 +841,6 @@ function renderZodiacBoard() {
 }
 
 // ==================== 连续不出实时榜单 ====================
-let boardLoaded = false;
-
 async function loadMissingBoard() {
     const btn = document.getElementById("boardRefreshBtn");
     if (btn) { btn.disabled = true; btn.textContent = "刷新中..."; }
@@ -824,7 +848,6 @@ async function loadMissingBoard() {
         const res = await fetch("/api/missing_board?top=10");
         const d = await res.json();
         renderMissingBoard(d);
-        boardLoaded = true;
     } catch (e) {
         document.getElementById("boardMeta").textContent = `加载失败：${e.message}`;
     } finally {
@@ -1027,22 +1050,34 @@ function renderBtStatCards() {
         b[1].avg_main_hits > a[1].avg_main_hits ? b : a);
     const totalSpecial = entries.reduce((s, [, v]) => s + v.special_hit_count, 0);
 
+    // 特码命中率：六种策略各押 1 个特码，所以命中次数是"策略数 × 期数"里
+    // 命中的总数。直接看总次数会被策略数放大，换算成"每个策略"才直观。
+    const nStrat = entries.length;
+    const periods = meta.periods_backtested || 1;
+    const avgSpecialRate = totalSpecial / (nStrat * periods) * 100;
+
+    // 正码命中：把"最优策略 vs 随机"的差距也换算成百分比，避免误读
+    const bestDiff = best[1].avg_main_hits - d.baseline.avg_main_hits;
+
     document.getElementById("btStatCards").innerHTML = `
         <div class="stat-card">
-            <div class="value">${meta.periods_backtested}</div>
+            <div class="value">${periods}</div>
             <div class="label">回测期数</div>
         </div>
         <div class="stat-card">
             <div class="value">${d.baseline.avg_main_hits}</div>
-            <div class="label">随机基准（平均正码命中）</div>
+            <div class="label">随机基准（平均每期命中正码数）</div>
         </div>
         <div class="stat-card">
             <div class="value" style="color:${STRATEGY_COLORS[best[0]]};">${best[1].avg_main_hits}</div>
-            <div class="label">最优策略：${meta.strategy_names[best[0]]}</div>
+            <div class="label">最优：${meta.strategy_names[best[0]]}
+                <span style="color:${bestDiff >= 0 ? '#22c55e' : '#ef4444'}">
+                    (${bestDiff >= 0 ? "+" : ""}${bestDiff.toFixed(3)})</span>
+            </div>
         </div>
         <div class="stat-card">
-            <div class="value">${totalSpecial}</div>
-            <div class="label">全策略特码命中次数</div>
+            <div class="value">${avgSpecialRate.toFixed(2)}%</div>
+            <div class="label">特码平均命中率（理论 ${d.baseline.special_hit_rate}%）</div>
         </div>
         <div class="stat-card">
             <div class="value">${meta.min_history}</div>
@@ -1087,7 +1122,10 @@ function renderBtMainHitsChart() {
             name: "个/期",
             nameTextStyle: { color: "#94a3b8" },
             axisLabel: { color: "#94a3b8" },
-            splitLine: { lineStyle: { color: "#1e293b" } }
+            splitLine: { lineStyle: { color: "#1e293b" } },
+            // 从 0 起：这几个策略的差异只有零点几个号码，
+            // 若让 ECharts 自动缩放会把微小差异放大成"差好几倍"的错觉
+            min: 0,
         },
         series: [{
             type: "bar",
@@ -1096,6 +1134,11 @@ function renderBtMainHitsChart() {
                 itemStyle: { color: STRATEGY_COLORS[names[i]] }
             })),
             barWidth: "45%",
+            label: {
+                show: true, position: "top",
+                color: "#94a3b8", fontSize: 10,
+                formatter: p_ => p_.value.toFixed(3)
+            },
             markLine: {
                 silent: true,
                 symbol: "none",
@@ -1110,7 +1153,7 @@ function renderBtMainHitsChart() {
                 }]
             }
         }],
-        grid: { left: 50, right: 20, top: 30, bottom: 40 },
+        grid: { left: 50, right: 20, top: 34, bottom: 40 },
     });
     window.addEventListener("resize", () => chart.resize());
 }
@@ -1122,15 +1165,28 @@ function renderBtSpecialChart() {
     const names = Object.keys(d.strategies);
     const labels = names.map(n => d.meta.strategy_names[n]);
     const values = names.map(n => d.strategies[n].special_hit_rate);
+    const counts = names.map(n => d.strategies[n].special_hit_count);
     const baseline = d.baseline.special_hit_rate;
+
+    // 每个策略押 1 个特码、共 periods 期，所以命中数 ~ 二项分布。
+    // 标注 95% 正常波动范围，避免把"1 个百分点"读成"差好几倍"：
+    //   命中次数少时，±2 个标准差能覆盖几个百分点的抖动，纯属噪声。
+    const periods = d.meta.periods_backtested || 1;
+    const p = baseline / 100;
+    const sd = Math.sqrt(periods * p * (1 - p)) / periods * 100;   // 命中率的标准差(%)
+    const lo = Math.max(0, baseline - 1.96 * sd);
+    const hi = baseline + 1.96 * sd;
 
     chart.setOption({
         tooltip: {
             trigger: "axis",
-            formatter: p => {
-                const i = p[0].dataIndex;
-                const s = d.strategies[names[i]];
-                return `${labels[i]}<br/>特码命中 ${s.special_hit_count} 次<br/>命中率 ${values[i]}%`;
+            formatter: p_ => {
+                const i = p_[0].dataIndex;
+                const diff = values[i] - baseline;
+                return `${labels[i]}<br/>`
+                    + `特码命中 ${counts[i]} 次 / ${periods} 期<br/>`
+                    + `命中率 ${values[i]}%　(理论 ${baseline}%)<br/>`
+                    + `偏差 ${diff >= 0 ? "+" : ""}${diff.toFixed(2)} 个百分点`;
             }
         },
         xAxis: {
@@ -1144,7 +1200,9 @@ function renderBtSpecialChart() {
             name: "%",
             nameTextStyle: { color: "#94a3b8" },
             axisLabel: { color: "#94a3b8" },
-            splitLine: { lineStyle: { color: "#1e293b" } }
+            splitLine: { lineStyle: { color: "#1e293b" } },
+            // 从 0 起，避免柱状图把微小差异放大
+            min: 0,
         },
         series: [{
             type: "bar",
@@ -1153,21 +1211,41 @@ function renderBtSpecialChart() {
                 itemStyle: { color: STRATEGY_COLORS[names[i]] }
             })),
             barWidth: "45%",
+            label: {
+                show: true, position: "top",
+                color: "#94a3b8", fontSize: 10,
+                formatter: p_ => `${p_.value}%`
+            },
             markLine: {
                 silent: true,
                 symbol: "none",
-                data: [{
-                    yAxis: baseline,
-                    lineStyle: { color: "#f59e0b", type: "dashed", width: 2 },
-                    label: {
-                        formatter: `随机基准 ${baseline}%`,
-                        color: "#f59e0b",
-                        position: "insideEndTop"
-                    }
-                }]
+                data: [
+                    {
+                        yAxis: baseline,
+                        lineStyle: { color: "#f59e0b", type: "dashed", width: 2 },
+                        label: {
+                            formatter: `理论 ${baseline}%`,
+                            color: "#f59e0b",
+                            position: "insideEndTop"
+                        }
+                    },
+                    // 95% 正常波动上下界：落在这个区间内 = 与随机无区别
+                    {
+                        yAxis: lo,
+                        lineStyle: { color: "#64748b", type: "dotted", width: 1 },
+                        label: { formatter: `95%下界 ${lo.toFixed(1)}%`, color: "#64748b",
+                                 fontSize: 9, position: "insideStartTop" }
+                    },
+                    {
+                        yAxis: hi,
+                        lineStyle: { color: "#64748b", type: "dotted", width: 1 },
+                        label: { formatter: `95%上界 ${hi.toFixed(1)}%`, color: "#64748b",
+                                 fontSize: 9, position: "insideStartBottom" }
+                    },
+                ]
             }
         }],
-        grid: { left: 50, right: 20, top: 30, bottom: 40 },
+        grid: { left: 50, right: 20, top: 34, bottom: 40 },
     });
     window.addEventListener("resize", () => chart.resize());
 }
@@ -1216,40 +1294,63 @@ function renderBtDistributionChart() {
 function renderBtTable() {
     const d = backtestData;
     const names = Object.keys(d.strategies);
+    const periods = d.meta.periods_backtested || 1;
 
     const head = `
         <thead>
             <tr>
                 <th>策略</th>
-                <th>平均正码命中</th>
-                <th>平均总命中</th>
-                <th>命中≥1个正码</th>
-                <th>特码命中</th>
-                <th>特码命中率</th>
-                <th>单期最佳</th>
-                <th>对比随机</th>
+                <th>平均正码命中<br/><span class="th-sub">个/期</span></th>
+                <th>对比随机<br/><span class="th-sub">个/期</span></th>
+                <th>正码命中率<br/><span class="th-sub">至少中 1 个的期数占比</span></th>
+                <th>特码命中<br/><span class="th-sub">次数 / 期数</span></th>
+                <th>特码命中率<br/><span class="th-sub">理论 ${d.baseline.special_hit_rate}%</span></th>
+                <th>单期最佳<br/><span class="th-sub">个正码</span></th>
             </tr>
         </thead>`;
 
     const baseline = d.baseline.avg_main_hits;
+    // 特码命中数近似二项分布：给出 95% 正常波动范围，
+    // 便于一眼判断某策略的偏差是否只是噪声（样本小时波动很大）
+    const p = d.baseline.special_hit_rate / 100;
+    const sd = Math.sqrt(periods * p * (1 - p)) / periods * 100;
+    const lo = Math.max(0, d.baseline.special_hit_rate - 1.96 * sd);
+    const hi = d.baseline.special_hit_rate + 1.96 * sd;
+
     const rows = names.map(n => {
         const s = d.strategies[n];
         const diff = s.avg_main_hits - baseline;
         const sign = diff >= 0 ? "+" : "";
         const color = diff >= 0 ? "#22c55e" : "#ef4444";
+
+        // 落在 95% 区间内 = 与随机猜无实质差异，用灰色弱化
+        const inRange = s.special_hit_rate >= lo && s.special_hit_rate <= hi;
+        const sColor = inRange ? "#94a3b8" : (s.special_hit_rate > hi ? "#22c55e" : "#ef4444");
+        const sTag = inRange ? ""
+            : ` <span style="font-size:10px">${s.special_hit_rate > hi ? "偏高" : "偏低"}</span>`;
+
         return `<tr>
             <td style="font-weight:600; color:${STRATEGY_COLORS[n]};">${d.meta.strategy_names[n]}</td>
             <td>${s.avg_main_hits}</td>
-            <td>${s.avg_any_hits}</td>
-            <td>${s.main_hit_rate}%</td>
-            <td>${s.special_hit_count} 次</td>
-            <td>${s.special_hit_rate}%</td>
-            <td>${s.best_main_hits} 个</td>
             <td style="color:${color};">${sign}${diff.toFixed(3)}</td>
+            <td>${s.main_hit_rate}%</td>
+            <td>${s.special_hit_count} / ${periods}</td>
+            <td style="color:${sColor};">${s.special_hit_rate}%${sTag}</td>
+            <td>${s.best_main_hits}</td>
         </tr>`;
     }).join("");
 
-    document.getElementById("btTable").innerHTML = head + `<tbody>${rows}</tbody>`;
+    // 表尾写明判读口径，避免把噪声当规律
+    const foot = `<tfoot><tr>
+        <td colspan="7" style="text-align:left; color:#64748b; font-size:12px; padding-top:10px;">
+            特码命中率的 95% 正常波动范围：
+            <b style="color:#94a3b8">${lo.toFixed(2)}% ~ ${hi.toFixed(2)}%</b>
+            （${periods} 期样本）。落在此区间内 = 与随机猜没有实质差别。
+            单期押 1 个特码的理论命中率是 ${d.baseline.special_hit_rate}%。
+        </td>
+    </tr></tfoot>`;
+
+    document.getElementById("btTable").innerHTML = head + `<tbody>${rows}</tbody>` + foot;
 }
 
 // ==================== 设置页 ====================
@@ -1948,8 +2049,7 @@ function initStaleBar() {
             if (d.inserted > 0) {
                 staleDismissed = true;
                 document.getElementById("staleBar").style.display = "none";
-                loadDashboard();
-                loadDataStatus();
+                refreshDataViews();
                 alert(`同步完成，新增 ${d.inserted} 期：${(d.new_periods || []).join("、")}`);
             } else {
                 // 源里确实还没有新数据 —— 提示但不重复骚扰
@@ -1995,8 +2095,7 @@ async function importRealData() {
             `（种子源 ${s.seed_count} 期 + 增量源补充，合并去重 ${s.merged_count} 期` +
             `${s.conflict_count ? `，重叠期号码不一致 ${s.conflict_count} 期已按官方缓存为准` : ""}）` +
             (s.latest ? `，最新第 ${s.latest.period} 期（${s.latest.draw_date}）` : ""));
-        loadDataStatus();
-        loadDashboard();   // 数据变了，仪表盘直接刷新
+        refreshDataViews();   // 数据变了，所有依赖库内数据的视图一起刷新
     } catch (e) {
         showDataStatus("err", `导入失败：${e.message}`);
     } finally {
@@ -2022,8 +2121,7 @@ async function syncLatestData() {
             + ((d.source_errors || []).length
                 ? `　⚠️ 部分数据源不可用：${d.source_errors.map(e => e.source).join("、")}`
                 : ""));
-        loadDataStatus();
-        if (d.inserted > 0) loadDashboard();
+        if (d.inserted > 0) refreshDataViews();
     } catch (e) {
         showDataStatus("err", `同步失败：${e.message}`);
     } finally {
