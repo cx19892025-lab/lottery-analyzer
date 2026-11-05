@@ -50,3 +50,6 @@ venv/
 
 # ECharts local cache (large binary, CDN fallback ok)
 # static/js/echarts.min.js
+
+# 内部协作规范（含 agent 代号与工作流程，不公开）
+AGENT_COLLABORATION_RULES.md
