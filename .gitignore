@@ -24,6 +24,13 @@ data/SHARED_BUILD
 data/browser_profile/
 browser_profile/
 
+# 随包分发的独立 Chromium（V1.8）
+# 约 400MB，绝不能进 git。构建前需手动放到这里，见 build_exe.py 顶部说明。
+browser/
+# 下载/解压 Chromium 时的中间产物
+_chromium*.zip
+_chromium_x/
+
 # IDE
 .vscode/
 .idea/
