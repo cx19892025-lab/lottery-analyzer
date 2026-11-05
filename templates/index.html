@@ -63,15 +63,21 @@
                 </div>
                 <div class="stat-cards" id="statCards"></div>
 
+                <!-- 口径横幅：明确告诉用户"下面所有图都是几期的" -->
+                <div class="scope-banner" id="scopeBanner"></div>
+
                 <!-- 频率分析 + 热力图 -->
                 <div class="grid-2">
                     <div class="card">
-                        <div class="card-title"><span class="icon">📊</span> 号码出现频率</div>
+                        <div class="card-title"><span class="icon">📊</span> 号码出现频率
+                            <span class="card-scope" data-scope="window"></span></div>
                         <div class="chart-note">正码 + 特码合计；虚线为每号平均次数</div>
                         <div class="chart-container" id="chartFrequency"></div>
                     </div>
                     <div class="card">
-                        <div class="card-title"><span class="icon">🔥</span> 号码热力图</div>
+                        <div class="card-title"><span class="icon">🔥</span> 号码热力图
+                            <span class="card-scope" data-scope="window"></span></div>
+                        <div class="chart-note">颜色深浅 = 该号码出现次数</div>
                         <div class="chart-container" id="chartHeatmap"></div>
                     </div>
                 </div>
@@ -79,11 +85,14 @@
                 <!-- 冷热号 + 遗漏值 -->
                 <div class="grid-2">
                     <div class="card">
-                        <div class="card-title"><span class="icon">🌡️</span> 冷热号（近30期）</div>
+                        <div class="card-title"><span class="icon">🌡️</span> 冷热号
+                            <span class="card-scope" data-scope="window"></span></div>
+                        <div class="chart-note">按出现次数排序；口径与上方统计窗口一致</div>
                         <div class="chart-container" id="chartHotCold"></div>
                     </div>
                     <div class="card">
-                        <div class="card-title"><span class="icon">⏳</span> 遗漏值排行</div>
+                        <div class="card-title"><span class="icon">⏳</span> 遗漏值排行
+                            <span class="card-scope" data-scope="window"></span></div>
                         <div class="chart-note">已连续多少期未出现，越久越"冷"</div>
                         <div class="chart-container" id="chartMissing"></div>
                     </div>
@@ -97,12 +106,13 @@
 
                 <div class="grid-2">
                     <div class="card">
-                        <div class="card-title"><span class="icon">✨</span> 特码号码频次</div>
+                        <div class="card-title"><span class="icon">✨</span> 特码号码频次
+                            <span class="card-scope" data-scope="window"></span></div>
                         <div class="chart-note">虚线为每号平均次数；上下浮动属正常</div>
                         <div class="chart-container" id="chartSpecialFreq"></div>
                     </div>
                     <div class="card">
-                        <div class="card-title"><span class="icon">⏳</span> 特码遗漏排行</div>
+                        <div class="card-title"><span class="icon">⏳</span> 特码遗漏排行 <span class="card-scope" data-scope="window"></span></div>
                         <div class="chart-note">最久没开出的特码</div>
                         <div class="chart-container" id="chartSpecialMissing"></div>
                     </div>
@@ -110,12 +120,12 @@
 
                 <div class="grid-2">
                     <div class="card">
-                        <div class="card-title"><span class="icon">🎨</span> 特码波色分布</div>
+                        <div class="card-title"><span class="icon">🎨</span> 特码波色分布 <span class="card-scope" data-scope="window"></span></div>
                         <div class="chart-note">虚线为各自平均占比（红 17 号、蓝绿各 16 号）</div>
                         <div class="chart-container-sm" id="chartSpecialColor"></div>
                     </div>
                     <div class="card">
-                        <div class="card-title"><span class="icon">🐾</span> 特码生肖分布</div>
+                        <div class="card-title"><span class="icon">🐾</span> 特码生肖分布 <span class="card-scope" data-scope="window"></span></div>
                         <div class="chart-note">按各期开奖日期所属农历年的生肖表换算；虚线为平均 8.33%</div>
                         <div class="chart-container-sm" id="chartSpecialZodiac"></div>
                     </div>
@@ -129,12 +139,12 @@
 
                 <div class="grid-2">
                     <div class="card">
-                        <div class="card-title"><span class="icon">🎯</span> 正码出现次数</div>
+                        <div class="card-title"><span class="icon">🎯</span> 正码出现次数 <span class="card-scope" data-scope="window"></span></div>
                         <div class="chart-note">虚线为每号平均次数</div>
                         <div class="chart-container" id="chartMainNumbers"></div>
                     </div>
                     <div class="card">
-                        <div class="card-title"><span class="icon">🐾</span> 正码生肖分布</div>
+                        <div class="card-title"><span class="icon">🐾</span> 正码生肖分布 <span class="card-scope" data-scope="window"></span></div>
                         <div class="chart-note">虚线为 12 生肖均分的期望值</div>
                         <div class="chart-container" id="chartMainZodiac"></div>
                     </div>
@@ -142,7 +152,7 @@
 
                 <!-- ============ 号码属性速查 ============ -->
                 <div class="card">
-                    <div class="card-title"><span class="icon">📇</span> 号码属性速查表</div>
+                    <div class="card-title"><span class="icon">📇</span> 号码属性速查表 <span class="card-scope scope-none">不受窗口影响</span></div>
                     <div class="chart-note" id="attributesNote">
                         每个号码的生肖 / 波色 / 五行；按生肖或波色下注时用这张表对照
                     </div>

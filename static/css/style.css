@@ -1476,3 +1476,53 @@ body {
     background: rgba(148, 163, 184, 0.05);
     border-radius: 6px;
 }
+
+/* ==================== V1.8.1 统计口径标注 ==================== */
+/* 顶部口径横幅：统一说明"以下所有图都是几期的" */
+.scope-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 16px;
+    margin: 14px 0 4px;
+    background: rgba(14, 165, 233, 0.08);
+    border-left: 3px solid #0ea5e9;
+    border-radius: 6px;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: var(--text-primary, #e2e8f0);
+}
+
+.scope-banner .scope-icon {
+    font-size: 15px;
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+.scope-banner .scope-text b {
+    color: #38bdf8;
+}
+
+.scope-banner .scope-tip {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+/* 卡片标题右侧的口径徽标 */
+.card-scope {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 9px;
+    background: rgba(148, 163, 184, 0.15);
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 400;
+    vertical-align: middle;
+}
+
+/* 不受统计窗口影响的卡片（如固定映射表） */
+.card-scope.scope-none {
+    background: rgba(148, 163, 184, 0.08);
+    color: #64748b;
+}

@@ -50,22 +50,29 @@ def frequency_analysis(limit=None):
     return result
 
 
-def hot_cold_numbers(recent_n=30, top_k=10):
+def hot_cold_numbers(recent_n=None, top_k=10, limit=None):
     """
-    冷热号分析
-    recent_n: 取最近N期
-    top_k: 取前/后 k 个
-    返回: {"hot": [(num, count), ...], "cold": [(num, count), ...]}
+    冷热号分析（按出现次数排序取前后各 k 个）。
+
+    ⚠️ 窗口口径（V1.8.1 修正）：
+      这里曾经默认 recent_n=30，而仪表盘的「统计窗口」选的是 100~1000 期，
+      结果冷热号卡片**永远只看最近 30 期**，与页面上其他卡片口径不一致，
+      用户看到"两个期数不一样"却无从判断哪个生效。
+
+      现在改为：优先用 limit（跟随仪表盘统计窗口），
+      未传 limit 时才退回 recent_n（单独调用本函数的场景）。
     """
-    freq = frequency_analysis(limit=recent_n)
+    window = limit if limit else recent_n
+    freq = frequency_analysis(limit=window)
     if not freq:
-        return {"hot": [], "cold": []}
+        return {"hot": [], "cold": [], "window": window}
 
     # 次数相同的号码按号码本身升序，保证结果可复现（回测依赖确定性）
     sorted_nums = sorted(freq.items(), key=lambda x: (-x[1], x[0]))
     return {
         "hot": sorted_nums[:top_k],
-        "cold": sorted_nums[-top_k:]
+        "cold": sorted_nums[-top_k:],
+        "window": window,
     }
 
 
@@ -974,7 +981,7 @@ def get_dashboard_data(window=500):
         "window": limit,
         # —— 单号维度：整体频率与冷热（正码+特码混合，用于看全局）——
         "frequency": frequency_analysis(limit),
-        "hot_cold": hot_cold_numbers(),
+        "hot_cold": hot_cold_numbers(limit=limit),
         "missing": missing_values(limit),
         # —— 正码单号专项（猜正码玩法）——
         "main_numbers": main_number_stats(limit),
