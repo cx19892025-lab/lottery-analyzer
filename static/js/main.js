@@ -194,6 +194,36 @@ function refreshDataViews() {
     }
 }
 
+// ==================== 统计口径标注 ====================
+// 用户反馈：仪表盘上「统计窗口」选的是 500 期，但冷热号卡片写「近30期」，
+// 两个期数不一致，不知道每张图到底统计了多少期。
+//
+// 根因有两层：
+//   1) 冷热号真的没用统计窗口（后端硬编码 recent_n=30）——已修
+//   2) 即使口径统一了，界面上也没有任何地方说明"这些图都是几期的"
+//
+// 这里给每个卡片打上口径徽标，并在顶部放一条横幅，统一说明。
+function renderScopeBanner(winText) {
+    const d = dashboardData;
+    const el = document.getElementById("scopeBanner");
+    if (!el) return;
+
+    const skipped = (d.total_periods || 0) - (d.stats_periods || 0);
+    el.innerHTML = `
+        <span class="scope-icon">📐</span>
+        <span class="scope-text">
+            以下<b>所有图表</b>均基于同一口径：
+            <b>${winText}</b>${d.window ? `（实际 ${Math.min(d.window, d.stats_periods)} 期）` : ""}
+            ${skipped > 0 ? `　·　统计基数 ${d.stats_periods} 期（已排除 ${skipped} 期早期缺失数据）` : ""}
+            <span class="scope-tip">切换上方「统计窗口」可整体改变口径</span>
+        </span>
+    `;
+
+    // 各卡片的徽标同步
+    document.querySelectorAll("#panel-dashboard .card-scope[data-scope='window']")
+        .forEach(b => { b.textContent = winText; });
+}
+
 // ==================== 仪表盘 ====================
 async function loadDashboard() {
     try {
@@ -216,6 +246,7 @@ async function loadDashboard() {
         document.getElementById("dashboardLoading").style.display = "none";
         document.getElementById("dashboardContent").style.display = "block";
 
+        renderScopeBanner(winText);
         renderStatCards();
         // 单号维度：整体频率与冷热
         renderFrequencyChart();
