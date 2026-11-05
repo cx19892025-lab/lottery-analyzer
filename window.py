@@ -37,12 +37,48 @@ _CHROME_CANDIDATES = [
 ]
 
 
+def find_bundled_chromium():
+    """
+    找随包分发的独立 Chromium（首选）。
+
+    为什么要自带浏览器（V1.8）：
+      早期版本借用用户机器上的 Edge/Chrome，虽然用了独立 profile，
+      但 Edge 仍会弹「登录以同步」引导，且与用户日常浏览器共用同一套
+      进程与身份体系——**存在影响用户账号的风险**（用户实际遇到账号被封）。
+
+      自带一份 Chromium 可以彻底隔离：不读用户的任何配置、不共享任何
+      身份信息、不弹登录提示。代价是分发包从 ~51MB 涨到 ~300MB。
+
+    查找顺序：
+      1. exe 同级 browser/          —— 打包时放的（用户可见，可自行替换）
+      2. 包内 browser/              —— PyInstaller 的 _internal 里
+      3. 开发时项目根 browser/      —— 源码运行
+    """
+    from paths import resource_path, exe_dir
+
+    candidates = [
+        os.path.join(exe_dir(), "browser", "chrome.exe"),
+        resource_path("browser", "chrome.exe"),
+    ]
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path, "内置 Chromium"
+    return None, None
+
+
 def find_browser():
     """
-    找一个能用 --app 模式的 Chromium 系浏览器。
+    找一个能用 --app 模式的浏览器。
+
+    优先用**随包自带的 Chromium**（完全独立，不碰用户账号）；
+    找不到才回退到系统 Edge/Chrome（并施加更严格的禁登录参数）。
 
     返回 (可执行文件路径, 名称)；找不到返回 (None, None)。
     """
+    bundled, bname = find_bundled_chromium()
+    if bundled:
+        return bundled, bname
+
     for path in _EDGE_CANDIDATES:
         if os.path.exists(path):
             return path, "Edge"
@@ -70,30 +106,65 @@ def _app_profile_dir():
     return d
 
 
+# 禁登录 / 禁同步 / 禁各类"引导"的参数。
+# 这些参数对内置 Chromium 与系统 Edge/Chrome 都适用。
+# 目的：不让程序弹出任何账号、登录、同步相关的东西。
+# 即使用户手动去点"登录"，请求也到不了微软/谷歌的账号服务。
+_NO_ACCOUNT_FLAGS = [
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-sync",                      # 关闭同步（登录后才会用到）
+    "--disable-background-networking",     # 不后台连账号/更新服务
+    "--disable-component-update",
+    "--disable-domain-reliability",
+    "--disable-client-side-phishing-detection",
+    "--disable-features=" + ",".join([
+        "Translate",
+        "DefaultBrowserSettingEnforcement",
+        # Edge 的账号/同步相关特性
+        "msEdgeIdentityFeature",
+        "msImplicitSignin",
+        "msSync",
+        "EdgeSync",
+        "SigninAllowed",
+        "SyncDisabled",
+        "EdgeCollections",
+        "EdgeShoppingAssistant",
+        "ShowRecommendations",
+        "EdgeSidebar",
+        # Chrome 的登录引导
+        "ChromeSignin",
+        "AccountConsistency",
+        "SyncPromoUI",
+        "SignInProfileCreation",
+    ]),
+    "--disable-background-mode",
+    "--no-service-autorun",
+    "--password-store=basic",              # 不碰系统凭据库
+    "--use-mock-keychain",
+]
+
+
 def open_app_window(url, title="六合彩数据分析工具", width=1360, height=900):
     """
     以独立窗口方式打开界面。
 
     返回 (是否成功, 说明文字)：
-      - (True, "Edge")  用 Edge 独立窗口打开
-      - (True, "Chrome") 用 Chrome 独立窗口打开
-      - (False, 原因)   没找到浏览器，调用方应回退到 webbrowser.open()
+      - (True, "内置 Chromium") 用随包自带的独立浏览器（首选）
+      - (True, "Edge"/"Chrome") 回退到系统浏览器
+      - (False, 原因)           没找到浏览器，调用方应回退到 webbrowser.open()
     """
     browser, name = find_browser()
     if not browser:
-        return False, "未找到 Edge 或 Chrome"
+        return False, "未找到内置 Chromium，也没有 Edge 或 Chrome"
 
     args = [
         browser,
         f"--app={url}",
         f"--user-data-dir={_app_profile_dir()}",
-        # 关掉首次运行的引导页/默认浏览器检查提示
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-features=Translate,DefaultBrowserSettingEnforcement",
         # 窗口初始尺寸（--app 模式下 window-size 生效）
         f"--window-size={width},{height}",
-    ]
+    ] + _NO_ACCOUNT_FLAGS
     try:
         subprocess.Popen(
             args,
@@ -360,34 +431,19 @@ def launch_window(url, on_close, title="六合彩数据分析工具"):
 
     实现说明：
       --app 模式没有提供"窗口已关闭"的回调，因此这里用最朴素但可靠的
-      办法——轮询进程是否还活着。浏览器进程退出即认为窗口关闭。
-      轮询间隔 1 秒，开销可忽略。
+      办法——轮询窗口是否还存在（按 profile 归属识别）。
+      轮询间隔 1.5 秒，开销可忽略。
+
+    ⚠️ 不要在这里另写一份启动参数。历史上这里和 open_app_window()
+       各有一份 args 列表，V1.8 加禁登录参数时只改了其中一处，
+       导致实际生效的仍是旧参数（排查花了很久）。
+       统一走 open_app_window()，只有一处需要维护。
     """
-    browser, name = find_browser()
-    if not browser:
-        return False, "未找到 Edge 或 Chrome"
-
-    args = [
-        browser,
-        f"--app={url}",
-        f"--user-data-dir={_app_profile_dir()}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-features=Translate,DefaultBrowserSettingEnforcement",
-        "--window-size=1360,900",
-    ]
-
     profile = _app_profile_dir()
 
-    try:
-        subprocess.Popen(
-            args,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except OSError as e:
-        return False, f"启动 {name} 失败: {e}"
+    ok, name = open_app_window(url, title=title)
+    if not ok:
+        return False, name
 
     def _watch():
         # 第一阶段：等窗口出现（最多 30 秒）。

@@ -9,12 +9,28 @@
     dist/六合彩分析工具/
         ├── 六合彩分析工具.exe
         ├── _internal/          依赖与静态资源
+        ├── browser/            随包分发的独立 Chromium（见下）
         └── data/
             ├── lottery.db      4404 期初始数据
             ├── settings.json   预置配置（可能含分享者的 Key）
             └── SHARED_BUILD    标记"Key 由分享者提供"，设置页据此提示
 
 把整个 dist/六合彩分析工具/ 目录压缩成 zip 发给别人即可。
+
+关于随包 Chromium（V1.8）：
+    早期版本借用用户机器上的 Edge/Chrome 起独立窗口。虽然用了独立
+    profile，但 Edge 仍会弹「登录以同步」引导，且与用户日常浏览器
+    共用同一套进程与身份体系——**存在影响用户账号的风险**
+    （用户实际遇到账号被封）。
+
+    因此改为随包分发一份完整 Chromium，彻底隔离：
+    不读用户任何配置、不共享身份、不弹登录提示。
+    代价是包体积从 ~51MB 涨到 ~200MB（压缩后）。
+
+    来源：https://storage.googleapis.com/chromium-browser-snapshots/Win_x64/
+    已删除其中的 interactive_ui_tests.exe（358MB 测试程序）等无用文件，
+    并把 locales 精简为中英文。**不要删除 159.0.8144.0.manifest**——
+    它是 SxS 清单，删掉会报「应用程序的并行配置不正确」而无法启动。
 
 ⚠️ 安全提醒：默认会带上当前 data/settings.json 里的 API Key，
    拿到包的人可以直接打开该文件看到明文。分享前请确认这是你想要的。
@@ -138,6 +154,26 @@ def build(include_key=True):
             with open(os.path.join(out_data, "SHARED_BUILD"), "w", encoding="utf-8") as f:
                 f.write("此包的 API Key 由分享者提供。\n")
             print("[OK] 已写入 SHARED_BUILD 标记（使用者打开设置页会看到提醒）")
+
+    # ---- 随包分发独立 Chromium ----
+    # 放在 exe 同级 browser/（不是 _internal/），这样用户看得见、
+    # 也能自行替换成别的 Chromium 版本。
+    # window.find_bundled_chromium() 按 exe 同级 → 包内 的顺序查找。
+    src_browser = os.path.join(ROOT, "browser")
+    out_browser = os.path.join(DIST_DIR, "browser")
+    if os.path.isdir(src_browser) and os.path.exists(
+            os.path.join(src_browser, "chrome.exe")):
+        if os.path.isdir(out_browser):
+            shutil.rmtree(out_browser)
+        shutil.copytree(src_browser, out_browser)
+        bsize = sum(
+            os.path.getsize(os.path.join(dp, fn))
+            for dp, _, fns in os.walk(out_browser) for fn in fns
+        )
+        print(f"[OK] 已放入独立浏览器 browser/ ({bsize/1024/1024:.0f} MB)")
+    else:
+        print("[警告] 未找到 browser/chrome.exe，将回退到系统 Edge/Chrome"
+              "（会弹登录引导，有账号风险）")
 
     total = sum(
         os.path.getsize(os.path.join(dp, fn))
