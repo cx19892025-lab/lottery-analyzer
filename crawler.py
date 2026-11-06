@@ -29,6 +29,7 @@ import gzip
 import csv
 import io
 import json
+import time
 
 from database import (
     insert_result, insert_many, get_all_results, get_raw_results,
@@ -47,14 +48,82 @@ _BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 
+def _describe_error(e):
+    """
+    把网络异常转成可读的中文说明。
+
+    背景（V1.8.2）：用户报「同步失败：renavon: URLError: ；marksix-rd: URLError:」
+    ——两个源后面都是**空的**，完全看不出发生了什么。
+
+    原因：urllib 的 URLError 在网络不可达时 str() 可能为空字符串，
+    而原来的 `f"{type(e).__name__}: {e}"` 就会产出 "URLError: "。
+    必须往下看 e.reason 才能拿到真实原因。
+
+    这里把它翻译成用户能据此行动的描述（超时？断网？DNS？代理？）。
+    """
+    import socket
+    from urllib.error import URLError
+
+    reason = getattr(e, "reason", None)
+    detail = str(reason) if reason is not None else str(e)
+    detail = (detail or "").strip()
+
+    low = detail.lower()
+    if isinstance(reason, socket.timeout) or "timed out" in low:
+        return "连接超时（网络慢或被墙）"
+    if isinstance(reason, socket.gaierror) or "getaddrinfo" in low or "name or service" in low:
+        return "域名解析失败（DNS 问题或断网）"
+    if "connection refused" in low:
+        return "连接被拒绝（对方服务器不可用）"
+    if "connection reset" in low or "aborted" in low:
+        return "连接被重置（可能被网络中间设备拦截）"
+    if "certificate" in low or "ssl" in low:
+        return "TLS/证书错误（可能有代理拦截）"
+    if "unreachable" in low:
+        return "网络不可达（检查是否断网）"
+
+    # 兜底：连 reason 都拿不到时，至少说明"网络层失败"而非"没抓到数据"
+    if not detail:
+        return f"网络请求失败（{type(e).__name__}，无详细信息）"
+    return f"{type(e).__name__}: {detail}"
+
+
+def _fetch_with_retry(make_request, attempts=3, backoff=1.5):
+    """
+    带重试的抓取。网络抖动导致的瞬时失败不该直接报给用户。
+
+    背景：用户遇到过一次同步失败，但几分钟后同样的操作就成功了
+    ——典型的瞬时网络抖动。原实现只试一次，一失败就报错。
+
+    策略：最多 attempts 次，间隔 backoff * 2^n 秒递增（1.5s / 3s / 6s）。
+    只对网络层异常重试；HTTP 4xx（如 403）重试也没用，直接抛出。
+    """
+    from urllib.error import HTTPError
+
+    last = None
+    for i in range(attempts):
+        try:
+            return make_request()
+        except HTTPError:
+            # 4xx/5xx 是服务端明确回应，重试无意义（除非 5xx，但这里从简）
+            raise
+        except Exception as e:
+            last = e
+            if i < attempts - 1:
+                time.sleep(backoff * (2 ** i))
+    raise last
+
+
 def _fetch_json(url):
     """抓取 URL 并解析 JSON（带 UA，raw.githubusercontent 对无 UA 请求偶尔 403）"""
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "lottery-analyzer/1.0 (+local tool)",
-        "Accept": "application/json",
-    })
-    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    def _once():
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "lottery-analyzer/1.0 (+local tool)",
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    return _fetch_with_retry(_once)
 
 
 def _fetch_renavon_csv():
@@ -62,17 +131,19 @@ def _fetch_renavon_csv():
     抓取 Renavon 的开奖结果 CSV。
     响应体实测为 gzip 压缩但未声明 Content-Encoding，故按魔数自行判断。
     """
-    req = urllib.request.Request(RENAVON_URL, headers={
-        "User-Agent": _BROWSER_UA,
-        "Accept": "*/*",
-        "Accept-Encoding": "gzip, deflate",
-    })
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        body = resp.read()
-    if body[:2] == b"\x1f\x8b":
-        body = gzip.decompress(body)
-    # utf-8-sig：文件带 BOM，否则第一个列名会变成 "﻿draw_record_id"
-    return body.decode("utf-8-sig", "replace")
+    def _once():
+        req = urllib.request.Request(RENAVON_URL, headers={
+            "User-Agent": _BROWSER_UA,
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate",
+        })
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = resp.read()
+        if body[:2] == b"\x1f\x8b":
+            body = gzip.decompress(body)
+        # utf-8-sig：文件带 BOM，否则第一个列名会变成 "﻿draw_record_id"
+        return body.decode("utf-8-sig", "replace")
+    return _fetch_with_retry(_once)
 
 
 
@@ -211,12 +282,12 @@ def _fetch_optional_sources():
     try:
         results.append(("renavon", _normalize_renavon(_fetch_renavon_csv())))
     except Exception as e:
-        errors.append(("renavon", f"{type(e).__name__}: {e}"))
+        errors.append(("renavon", _describe_error(e)))
 
     try:
         results.append(("marksix-rd", _normalize_marksix_rd(_fetch_json(LATEST_URL))))
     except Exception as e:
-        errors.append(("marksix-rd", f"{type(e).__name__}: {e}"))
+        errors.append(("marksix-rd", _describe_error(e)))
 
     return results, errors
 
@@ -367,6 +438,11 @@ def sync_latest():
     inserted = insert_many(valid)
     new_periods = sorted(d["period"] for d in valid if d["period"] not in existing)[-10:]
 
+    # 同步成功但没新增时，用户最想知道的是「到底是没开奖，还是源没更新」。
+    # 这里直接比对：库内最新日期 vs 源内最新日期。
+    source_latest = max((d["draw_date"] for d in valid), default=None)
+    db_latest = (get_raw_results(1) or [{}])[0].get("draw_date")
+
     return {
         "ok": True,
         "inserted": inserted,
@@ -375,6 +451,11 @@ def sync_latest():
         "source_errors": [{"source": n, "error": e} for n, e in errors],
         "new_periods": new_periods,
         "total_periods": get_results_count(),
+        # —— 诊断字段：解释"为什么没有新增" ——
+        "db_latest_date": db_latest,
+        "source_latest_date": source_latest,
+        # 源内最新 = 库内最新 → 源尚未收录新一期（不是程序问题）
+        "source_behind": bool(source_latest and db_latest and source_latest <= db_latest),
     }
 
 
