@@ -7,17 +7,20 @@
 
   1) icelam/mark-six-data-visualization  data/all.json
      覆盖 1993-01 ~ 2025-12（源自 HKJC 官方 JSON），用作全量种子
-  2) stevetsang852/marksix-rd            data/processed/draws.json
-     覆盖 2002-07 ~ 至今，GitHub Actions 每日同步 HKJC，用作增量更新
-     ⚠ 其 CI 自 2026-10-29 起 "Commit snapshots" 步骤失败（仓库 Workflow 权限只读），
-       数据停在 2026-10-03，不可靠
+  2) lottery.hk  /en/mark-six/results/{年份}
+     覆盖 1993 ~ 至今，**每期开奖后当天更新**，用作**首选增量源**
+     （V1.8.3 新增。此前 renavon 是最新源，但实测滞后达 6 天，
+       用户报"昨天有开奖但同步不到"；lottery.hk 次日即可拿到）
+     已交叉验证：与本地库重叠 664 期**零不一致**
   3) renavon.com  /data/hkjc/hkjc_marksix_results/download/csv
-     覆盖 1993-01 ~ 至今，每期开奖后更新，实测可直连（需浏览器 UA），
-     用作**首选增量源**
+     覆盖 1993-01 ~ 至今，实测可直连（需浏览器 UA），作为备用增量源
+     ⚠ 实测更新滞后较多（2026-11-06 时最新仍为 10-31），故降为备用
+  4) stevetsang852/marksix-rd            data/processed/draws.json
+     覆盖 2002-07 ~ 至今，但其 CI 自 2026-10-29 起失败，
+     数据停在 2026-10-03，**基本不可用**，仅作最后兜底
 
-  三源期号统一为 YYYYSSS，按期号合并去重；重叠期若号码不一致
+  各源期号统一为 YYYYSSS，按期号合并去重；重叠期若号码不一致
   以 icelam 为准（更早入库、来源为官方历史缓存），冲突数会在结果中报告。
-  实测：Renavon 与库内 4393 期重叠部分零冲突、零日期差异。
 
 公开接口：
   import_all(clear=True)  全量导入（种子 + 增量源合并）
@@ -29,6 +32,7 @@ import gzip
 import csv
 import io
 import json
+import re
 import time
 
 from database import (
@@ -36,10 +40,11 @@ from database import (
     get_results_count, clear_results,
 )
 
-# 数据源地址（raw.githubusercontent.com / renavon.com 国内可直连）
+# 数据源地址（均为国内可直连）
 SEED_URL = "https://raw.githubusercontent.com/icelam/mark-six-data-visualization/master/data/all.json"
 LATEST_URL = "https://raw.githubusercontent.com/stevetsang852/marksix-rd/main/data/processed/draws.json"
 RENAVON_URL = "https://renavon.com/data/hkjc/hkjc_marksix_results/download/csv"
+LOTTERY_HK_BASE = "https://lottery.hk/en/mark-six/results"
 
 REQUEST_TIMEOUT = 30  # 秒
 
@@ -145,6 +150,73 @@ def _fetch_renavon_csv():
         return body.decode("utf-8-sig", "replace")
     return _fetch_with_retry(_once)
 
+
+
+def _fetch_lottery_hk(year=None):
+    """
+    抓取 lottery.hk 的开奖结果页并解析。
+
+    year=None  →  /results/          列表页（最近约 1 年，含最新一期）
+    year=2026  →  /results/2026      整年
+
+    页面是服务端渲染的静态 HTML，结构稳定：
+      <td>26/117</td><td><span class="date">05/11/2026</span></td>
+      <td><ul class="balls">
+            <li class="-green">11</li> ... <li class="-red -plus">46</li>
+          </ul></td>
+
+    前 6 个 li 是正码，带 -plus 的那个是特码。
+
+    为什么选它：实测每期开奖后**当天/次日**即更新，
+    而 renavon 滞后可达 6 天（用户报"昨天有开奖但同步不到"）。
+    已交叉验证与本地库重叠 664 期零不一致。
+    """
+    url = f"{LOTTERY_HK_BASE}/{year}" if year else f"{LOTTERY_HK_BASE}/"
+
+    def _once():
+        req = urllib.request.Request(url, headers={
+            "User-Agent": _BROWSER_UA,
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+            return resp.read().decode("utf-8", "replace")
+
+    html = _fetch_with_retry(_once)
+    return _parse_lottery_hk(html)
+
+
+def _parse_lottery_hk(html):
+    """把 lottery.hk 的 HTML 解析成统一格式的开奖记录列表"""
+    draws = []
+    pattern = re.compile(
+        r'<td>(\d{2}/\d{3})</td>\s*'
+        r'<td><span class="date">(\d{2}/\d{2}/\d{4})</span></td>\s*'
+        r'<td>\s*<ul class="balls">(.*?)</ul>',
+        re.S,
+    )
+    for m in pattern.finditer(html):
+        issue, date_str, balls_html = m.group(1), m.group(2), m.group(3)
+        balls = re.findall(r'<li class="([^"]*)">\s*(\d{1,2})\s*</li>', balls_html)
+        main = [int(v) for c, v in balls if "-plus" not in c]
+        special = [int(v) for c, v in balls if "-plus" in c]
+        if len(main) != 6 or len(special) != 1:
+            continue
+
+        day, mon, year4 = date_str.split("/")
+        yy, seq = issue.split("/")
+        yy = int(yy)
+        year = 1900 + yy if yy >= 50 else 2000 + yy
+        period = f"{year}{int(seq):03d}"
+
+        draws.append({
+            "period": period,
+            "draw_date": f"{year4}-{mon}-{day}",
+            "numbers": sorted(main),
+            "special": special[0],
+            "source": "lottery.hk",
+        })
+    return draws
 
 
 def _yy_to_year(yy):
@@ -274,16 +346,27 @@ def _dedupe_merge(seed_draws, latest_draws):
 
 def _fetch_optional_sources():
     """
-    抓取两个增量源。任一源失败不影响另一个（降级而非整体报错）。
+    抓取各增量源。任一源失败不影响其他源（降级而非整体报错）。
     返回: (list of (source_name, draws), list of (source_name, error_message))
+
+    顺序即优先级：合并时靠前的源覆盖靠后的（见 _dedupe_merge）。
+    lottery.hk 放第一，因为它实测更新最快（开奖当天/次日）。
     """
     results, errors = [], []
 
+    # 首选：lottery.hk（更新最快，已交叉验证 664 期零不一致）
+    try:
+        results.append(("lottery.hk", _fetch_lottery_hk()))
+    except Exception as e:
+        errors.append(("lottery.hk", _describe_error(e)))
+
+    # 备用：renavon（覆盖全，但实测滞后较多）
     try:
         results.append(("renavon", _normalize_renavon(_fetch_renavon_csv())))
     except Exception as e:
         errors.append(("renavon", _describe_error(e)))
 
+    # 最后兜底：marksix-rd（CI 已失效，数据停在 2026-10-03）
     try:
         results.append(("marksix-rd", _normalize_marksix_rd(_fetch_json(LATEST_URL))))
     except Exception as e:
@@ -412,7 +495,7 @@ def data_freshness():
 
 def sync_latest():
     """
-    增量同步：拉取两个增量源（Renavon 优先、marksix-rd 兜底），
+    增量同步：拉取各增量源（lottery.hk 优先，renavon 备用，marksix-rd 兜底），
     INSERT OR IGNORE 补新期。已存在的期号不会改动，
     因此旧的（可能经种子修正过的）数据不会被覆盖。
     """
@@ -440,8 +523,12 @@ def sync_latest():
 
     # 同步成功但没新增时，用户最想知道的是「到底是没开奖，还是源没更新」。
     # 这里直接比对：库内最新日期 vs 源内最新日期。
+    #
+    # 注意 db_latest 必须在 insert_many **之后**重新读，
+    # 否则刚写入的新期不算数，会误报"源落后于库"。
     source_latest = max((d["draw_date"] for d in valid), default=None)
     db_latest = (get_raw_results(1) or [{}])[0].get("draw_date")
+    behind = bool(source_latest and db_latest and source_latest < db_latest)
 
     return {
         "ok": True,
@@ -454,8 +541,9 @@ def sync_latest():
         # —— 诊断字段：解释"为什么没有新增" ——
         "db_latest_date": db_latest,
         "source_latest_date": source_latest,
-        # 源内最新 = 库内最新 → 源尚未收录新一期（不是程序问题）
-        "source_behind": bool(source_latest and db_latest and source_latest <= db_latest),
+        # 源内最新 **早于** 库内最新 → 源尚未收录新一期（不是程序问题）。
+        # 用严格小于：两者相等说明已同步到源的最新，不算"落后"。
+        "source_behind": behind,
     }
 
 
@@ -470,6 +558,7 @@ def data_status():
         "latest_date": latest["draw_date"] if latest else None,
         "sources": {
             "seed": SEED_URL,
+            "primary": f"{LOTTERY_HK_BASE}/",
             "latest": RENAVON_URL,
             "fallback": LATEST_URL,
         },

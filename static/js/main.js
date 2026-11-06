@@ -2086,8 +2086,8 @@ function initStaleBar() {
                 // 源里确实还没有新数据 —— 说明清楚原因，但不重复骚扰
                 document.getElementById("staleText").innerHTML = d.source_behind
                     ? `已检查数据源：<b>源尚未收录新一期</b>——`
-                      + `库内与源内最新都停在 <b>${d.db_latest_date}</b>。`
-                      + `数据源由第三方每日更新，通常滞后 1~2 天，稍后再试即可。`
+                      + `源内最新为 <b>${d.source_latest_date}</b>，库内已到 <b>${d.db_latest_date}</b>。`
+                      + `数据源由第三方更新，通常滞后 1~2 天，稍后再试即可。`
                     : `已检查数据源：暂无新期号（库内共 ${d.total_periods} 期）。`
                       + `可能是该期未开奖，稍后再试。`;
                 syncBtn.style.display = "none";
@@ -2157,8 +2157,8 @@ async function syncLatestData() {
             msg = `同步完成：新增 ${d.inserted} 期（${(d.new_periods || []).join("、")}），库内共 ${d.total_periods} 期`;
         } else if (d.source_behind) {
             msg = `已是最新，但<b>数据源尚未收录新一期</b>：`
-                + `库内与源内最新都停在 ${d.db_latest_date}。`
-                + `数据源由第三方每日更新，通常滞后 1~2 天，请稍后再试。`
+                + `源内最新为 ${d.source_latest_date}，库内已到 ${d.db_latest_date}。`
+                + `数据源由第三方更新，通常滞后 1~2 天，请稍后再试。`
                 + `（库内共 ${d.total_periods} 期）`;
         } else {
             msg = `已是最新：没有新增期号（库内共 ${d.total_periods} 期）`;
