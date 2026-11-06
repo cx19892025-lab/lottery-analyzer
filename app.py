@@ -204,8 +204,19 @@ def api_data_sync():
 
 @app.route("/api/recommend")
 def api_recommend():
-    """智能选号推荐"""
+    """
+    智能选号推荐。
+
+    strategy 必须是 STRATEGIES 之一，否则返回 400。
+    （V1.8.4 修复：此前非法策略名会被静默当作 balanced 处理，
+      返回 200 且看不出参数有误，调用方无从发现自己传错了。）
+    """
     strategy = request.args.get("strategy", "balanced")
+    if strategy not in STRATEGIES:
+        return jsonify({
+            "error": f"未知策略：{strategy}",
+            "valid": STRATEGIES,
+        }), 400
     return jsonify(smart_recommend(strategy))
 
 
