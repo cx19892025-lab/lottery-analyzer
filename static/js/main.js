@@ -802,6 +802,9 @@ async function loadHistory() {
     const body = document.getElementById("historyBody");
     if (body.children.length > 0) return; // 已加载
 
+    // 下一期开奖日期（纯本地推算，不联网）
+    renderNextDraw();
+
     const res = await fetch("/api/history?limit=100");
     const data = await res.json();
 
@@ -815,6 +818,35 @@ async function loadHistory() {
             <td>${createBallWithZodiac(r.special, r.special_zodiac, true)}</td>
         </tr>`;
     }).join("");
+}
+
+// ==================== 下一期开奖日期（V1.9.3）====================
+// 用户要求：开奖记录页给出下一期开奖日期。
+// 数据来自 /api/data/status 的 next_draw 字段（后端按周二/四/六推算，不联网）。
+async function renderNextDraw() {
+    const bar = document.getElementById("nextDrawBar");
+    if (!bar) return;
+    try {
+        const res = await fetch("/api/data/status");
+        const d = await res.json();
+        const n = d.next_draw;
+        if (!n || !n.known) { bar.style.display = "none"; return; }
+
+        const urgent = n.days_until <= 0;
+        bar.className = "next-draw-bar" + (urgent ? " urgent" : "");
+        bar.innerHTML = `
+            <span class="nd-icon">${urgent ? "🔔" : "🗓️"}</span>
+            <span class="nd-main">
+                下一期 <b>${n.next_period || "—"}</b> 期
+                <b class="nd-date">${n.date}</b>（${n.weekday}）
+            </span>
+            <span class="nd-note">${n.note}</span>
+            <span class="nd-hint">按周二/四/六规律推算，以官方公告为准</span>
+        `;
+        bar.style.display = "flex";
+    } catch (e) {
+        bar.style.display = "none";
+    }
 }
 
 // ==================== 智能选号 ====================
