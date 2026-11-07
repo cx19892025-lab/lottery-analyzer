@@ -1847,3 +1847,34 @@ body {
     color: #64748b;
     font-size: 11.5px;
 }
+
+/* ==================== V1.9.4 开奖记录页同步按钮 ==================== */
+.hist-sync-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.hist-sync-row .generate-btn {
+    padding: 10px 22px;
+    font-size: 14px;
+    margin: 0;
+}
+
+.hist-sync-tip {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.hist-sync-tip.ok {
+    color: #22c55e;
+    font-weight: 600;
+}
+
+.hist-sync-tip.err {
+    color: #ef4444;
+    font-weight: 600;
+}

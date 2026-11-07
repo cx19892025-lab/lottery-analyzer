@@ -196,6 +196,9 @@ let boardsStale = false;   // 数据变了但选号页不可见，留待下次�
 function refreshDataViews() {
     loadDashboard();
     loadDataStatus();
+    // 开奖记录：已加载过才重拉（没进过该页就不用管）
+    const hisBody = document.getElementById("historyBody");
+    if (hisBody && hisBody.children.length > 0) loadHistory(true);
     // 榜单只在对应标签页可见时才刷，避免无谓请求
     const rec = document.querySelector('.tab-btn[data-tab="recommend"]');
     if (rec && rec.classList.contains("active")) {
@@ -798,9 +801,10 @@ function renderMainZodiacChart() {
 }
 
 // ==================== 开奖记录 ====================
-async function loadHistory() {
+async function loadHistory(force = false) {
     const body = document.getElementById("historyBody");
-    if (body.children.length > 0) return; // 已加载
+    // 默认只在首次进入时加载；force=true 时强制重拉（同步后刷新用）
+    if (!force && body.children.length > 0) return;
 
     // 下一期开奖日期（纯本地推算，不联网）
     renderNextDraw();
@@ -818,6 +822,58 @@ async function loadHistory() {
             <td>${createBallWithZodiac(r.special, r.special_zodiac, true)}</td>
         </tr>`;
     }).join("");
+}
+
+// ==================== 开奖记录页：同步按钮（V1.9.4）====================
+// 用户要求：开奖记录那边加一个更新键，更新后让全局更新。
+// 复用设置页的 /api/data/sync，成功后调用 refreshDataViews() 刷新所有视图。
+async function syncFromHistory() {
+    const btn = document.getElementById("historySyncBtn");
+    const tip = document.getElementById("historySyncTip");
+    if (btn) { btn.disabled = true; btn.textContent = "同步中..."; }
+    if (tip) { tip.textContent = "正在抓取最新开奖..."; tip.className = "hist-sync-tip"; }
+
+    try {
+        const res = await fetch("/api/data/sync", { method: "POST" });
+        const d = await res.json();
+        if (!res.ok) {
+            if (tip) {
+                tip.textContent = `❌ ${d.error || "同步失败"}`;
+                tip.className = "hist-sync-tip err";
+            }
+            return;
+        }
+
+        if (d.inserted > 0) {
+            if (tip) {
+                tip.textContent = `✅ 新增 ${d.inserted} 期：${(d.new_periods || []).join("、")}`;
+                tip.className = "hist-sync-tip ok";
+            }
+        } else {
+            // 没有新增时讲清原因（源没更新 vs 真没开奖）
+            if (tip) {
+                tip.textContent = d.source_behind
+                    ? `ℹ️ 源尚未收录新一期（源内最新 ${d.source_latest_date}），稍后再试`
+                    : `ℹ️ 已是最新，库内共 ${d.total_periods} 期`;
+                tip.className = "hist-sync-tip";
+            }
+        }
+
+        // 无论有没有新增都刷新：
+        //   - 有新增：当然要刷
+        //   - 没新增：用户点同步的意图就是"确认一下最新状态"，
+        //     此时刷新能让"下一期日期"和数据状态跟着更新，
+        //     否则点了没反应，用户以为按钮坏了
+        refreshDataViews();
+        await loadHistory(true);
+    } catch (e) {
+        if (tip) {
+            tip.textContent = `❌ 同步失败：${e.message}`;
+            tip.className = "hist-sync-tip err";
+        }
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "🔄 同步最新开奖"; }
+    }
 }
 
 // ==================== 下一期开奖日期（V1.9.3）====================
