@@ -130,7 +130,10 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 
         // 懒加载
         if (btn.dataset.tab === "history") loadHistory();
-        if (btn.dataset.tab === "decoder") loadDecoderCategories();
+        if (btn.dataset.tab === "decoder") {
+            loadDecoderCategories();
+            renderDecodeHistory();   // V1.9：解码历史
+        }
         if (btn.dataset.tab === "backtest") loadBacktestTab();
         if (btn.dataset.tab === "tracker") initTracker();
         if (btn.dataset.tab === "recommend") {
@@ -1844,13 +1847,31 @@ async function doVisionDecode(imageDataUrl, mimeType) {
         // 显示解码结果
         if (decode.recommended && decode.recommended.main) {
             const rec = decode.recommended;
+            const cnt = decode.candidate_count || 0;
+            const complete = decode.is_complete;
+
+            // V1.9：不再"硬凑一组号"。
+            // 候选不足 7 个时明说，而不是用 6+1 的版式假装是完整一注。
+            const headNote = complete
+                ? `<div class="label">🔮 AI 图解码推荐号码</div>`
+                : `<div class="label">🔮 AI 图解码 · 候选号码
+                     <span style="color:#f59e0b; font-size:12px;">
+                     （仅识别出 ${cnt} 个候选，未凑满 7 个）</span></div>`;
 
             resultDiv.innerHTML = `
                 <div class="result-display">
-                    <div class="label">🔮 AI 图解码推荐号码</div>
+                    ${headNote}
                     ${renderBallsRow(rec)}
                 </div>
             `;
+
+            if (!complete) {
+                resultDiv.innerHTML += `
+                    <div class="decode-honest-note">
+                        ⚠️ 图上可用的解码线索只支撑 ${cnt} 个号码，
+                        <b>没有硬凑</b>。可以：补充手动选择元素，或换一张更清晰的图。
+                    </div>`;
+            }
 
             // 推荐理由（每个号码为什么被选中）
             resultDiv.innerHTML += renderReasonList(
@@ -1862,7 +1883,9 @@ async function doVisionDecode(imageDataUrl, mimeType) {
                 const top15 = decode.all_candidates.slice(0, 15);
                 resultDiv.innerHTML += `
                     <div style="margin-top:16px;">
-                        <div style="color:var(--text-secondary); font-size:13px; margin-bottom:8px;">📊 候选号码权重排行</div>
+                        <div style="color:var(--text-secondary); font-size:13px; margin-bottom:8px;">
+                            📊 候选号码权重排行（共 ${cnt} 个，越亮权重越高）
+                        </div>
                         <div class="balls-row">
                             ${top15.map(c => `
                                 <span class="ball ${getBallColor(c.number)}" title="${reasonTooltip(decode, c.number, c.score)}"
@@ -1877,6 +1900,13 @@ async function doVisionDecode(imageDataUrl, mimeType) {
 
             // 自动同步手动选择状态
             syncManualSelections(selections);
+
+            // V1.9：保存本次解码（含缩略图，便于回看）
+            saveDecodeRecord({
+                vision, decode, selections,
+                image: imageDataUrl,
+                source: "AI 识图",
+            });
         } else {
             resultDiv.innerHTML = '<div class="result-display"><div class="label">⚠️ 未能从图片中提取到足够的解码元素，请手动补充选择</div></div>';
         }
@@ -1890,6 +1920,179 @@ async function doVisionDecode(imageDataUrl, mimeType) {
         statusDiv.style.display = "none";
         resultDiv.innerHTML = `<div class="result-display"><div class="label" style="color:#ef4444;">❌ 网络错误: ${err.message}</div></div>`;
     }
+}
+
+// ==================== 解码历史（V1.9）====================
+// 用户反馈：解码结果刷新页面就没了，想留个记录。
+// 存 localStorage（本机、离线、不需要后端改表），并支持导出 JSON。
+//
+// 为什么不存后端 SQLite：
+//   解码是轻量、个人化的记录，且可能含用户上传的图片（体积大）。
+//   存浏览器更合适：不污染开奖库、不随包分发、清缓存即清空。
+const DECODE_HISTORY_KEY = "lottery_decode_history_v1";
+const DECODE_HISTORY_MAX = 50;        // 最多保留条数
+const DECODE_THUMB_MAX = 160;         // 缩略图最长边（px），控制存储体积
+
+let decodeHistoryCache = null;
+
+function loadDecodeHistory() {
+    if (decodeHistoryCache) return decodeHistoryCache;
+    try {
+        decodeHistoryCache = JSON.parse(localStorage.getItem(DECODE_HISTORY_KEY) || "[]");
+        if (!Array.isArray(decodeHistoryCache)) decodeHistoryCache = [];
+    } catch (e) {
+        decodeHistoryCache = [];
+    }
+    return decodeHistoryCache;
+}
+
+function persistDecodeHistory() {
+    try {
+        localStorage.setItem(DECODE_HISTORY_KEY, JSON.stringify(decodeHistoryCache || []));
+        return true;
+    } catch (e) {
+        // 配额满（图片多时可能触发）：丢掉最旧的再试一次
+        try {
+            decodeHistoryCache = (decodeHistoryCache || []).slice(0, 10);
+            localStorage.setItem(DECODE_HISTORY_KEY, JSON.stringify(decodeHistoryCache));
+            return true;
+        } catch (e2) {
+            console.warn("解码历史保存失败（存储配额不足）", e2);
+            return false;
+        }
+    }
+}
+
+// 把图片压成小缩略图，避免 localStorage 被撑爆（配额通常 5MB）
+function makeThumbnail(dataUrl, maxSide = DECODE_THUMB_MAX) {
+    return new Promise(resolve => {
+        if (!dataUrl) return resolve(null);
+        const img = new Image();
+        img.onload = () => {
+            const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+            const w = Math.round(img.width * scale);
+            const h = Math.round(img.height * scale);
+            const cv = document.createElement("canvas");
+            cv.width = w; cv.height = h;
+            cv.getContext("2d").drawImage(img, 0, 0, w, h);
+            try {
+                resolve(cv.toDataURL("image/jpeg", 0.7));
+            } catch (e) {
+                resolve(null);
+            }
+        };
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
+    });
+}
+
+async function saveDecodeRecord({ vision, decode, selections, image, source }) {
+    const rec = decode && decode.recommended ? decode.recommended : { main: [], special: null };
+    const thumb = await makeThumbnail(image);
+    const entry = {
+        id: Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+        time: new Date().toISOString(),
+        source: source || "AI 识图",
+        main: rec.main || [],
+        special: rec.special,
+        candidate_count: (decode && decode.candidate_count) || 0,
+        is_complete: !!(decode && decode.is_complete),
+        description: (vision && vision.description) || "",
+        vision: vision || {},
+        selections: selections || {},
+        thumb,
+    };
+    const hist = loadDecodeHistory();
+    hist.unshift(entry);
+    if (hist.length > DECODE_HISTORY_MAX) hist.length = DECODE_HISTORY_MAX;
+    decodeHistoryCache = hist;
+    persistDecodeHistory();
+    renderDecodeHistory();
+}
+
+function renderDecodeHistory() {
+    const box = document.getElementById("decodeHistory");
+    const cnt = document.getElementById("decodeHistCount");
+    if (!box) return;
+    const hist = loadDecodeHistory();
+
+    if (cnt) cnt.textContent = hist.length ? `（${hist.length} 条）` : "";
+
+    if (!hist.length) {
+        box.innerHTML = '<div class="hist-empty">还没有保存的解码记录。完成一次解码后会自动保存。</div>';
+        return;
+    }
+
+    box.innerHTML = hist.map(e => {
+        const t = new Date(e.time);
+        const stamp = `${t.getMonth() + 1}/${t.getDate()} ${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+        const balls = [
+            ...(e.main || []).map(n => `<span class="hist-ball ${getBallColor(n)}">${n}</span>`),
+            e.special != null ? `<span class="hist-ball ${getBallColor(e.special)} special">${e.special}</span>` : "",
+        ].join("");
+        const incomplete = !e.is_complete
+            ? `<span class="hist-warn">仅 ${e.candidate_count} 个候选</span>` : "";
+        return `<div class="hist-item" data-id="${e.id}">
+            ${e.thumb ? `<img class="hist-thumb" src="${e.thumb}" alt="" onclick="showHistDetail('${e.id}')" />`
+                      : `<div class="hist-thumb hist-thumb-empty">无图</div>`}
+            <div class="hist-body" onclick="showHistDetail('${e.id}')">
+                <div class="hist-top">
+                    <span class="hist-time">${stamp}</span>
+                    <span class="hist-src">${e.source}</span>
+                    ${incomplete}
+                </div>
+                <div class="hist-balls">${balls || '<span style="color:#64748b">无候选</span>'}</div>
+                <div class="hist-desc">${(e.description || "(无描述)").slice(0, 60)}</div>
+            </div>
+            <button type="button" class="hist-del" title="删除" onclick="deleteDecodeRecord('${e.id}')">✕</button>
+        </div>`;
+    }).join("");
+}
+
+function showHistDetail(id) {
+    const e = loadDecodeHistory().find(x => x.id === id);
+    if (!e) return;
+    const t = new Date(e.time).toLocaleString();
+    const lines = [
+        `时间：${t}`,
+        `来源：${e.source}`,
+        `候选数：${e.candidate_count}${e.is_complete ? "（完整）" : "（未凑满 7 个）"}`,
+        `描述：${e.description || "(无)"}`,
+        "",
+        "识别元素：",
+        ...Object.entries(e.vision || {})
+            .filter(([k, v]) => Array.isArray(v) && v.length)
+            .map(([k, v]) => `  ${k}: ${v.join("、")}`),
+    ];
+    alert(lines.join("\n"));
+}
+
+function deleteDecodeRecord(id) {
+    decodeHistoryCache = loadDecodeHistory().filter(x => x.id !== id);
+    persistDecodeHistory();
+    renderDecodeHistory();
+}
+
+function clearDecodeHistory() {
+    if (!confirm("确定清空全部解码历史？此操作不可撤销。")) return;
+    decodeHistoryCache = [];
+    persistDecodeHistory();
+    renderDecodeHistory();
+}
+
+function exportDecodeHistory() {
+    const hist = loadDecodeHistory();
+    if (!hist.length) { alert("还没有解码记录可导出。"); return; }
+    // 导出时去掉缩略图（体积大且导出后无意义）
+    const out = hist.map(({ thumb, ...rest }) => rest);
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    const d = new Date();
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    a.download = `解码历史_${stamp}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
 }
 
 function syncManualSelections(selections) {
@@ -1938,13 +2141,30 @@ async function doDecode() {
     }
 
     const rec = data.recommended;
+    const cnt = data.candidate_count || 0;
+    const complete = data.is_complete;
+
+    // V1.9：候选不足时如实说明，不用 6+1 的版式假装完整一注
+    const headNote = complete
+        ? `<div class="label">🔮 解码推荐号码</div>`
+        : `<div class="label">🔮 解码候选号码
+             <span style="color:#f59e0b; font-size:12px;">
+             （仅 ${cnt} 个候选，未凑满 7 个）</span></div>`;
 
     resultDiv.innerHTML = `
         <div class="result-display">
-            <div class="label">🔮 解码推荐号码</div>
+            ${headNote}
             ${renderBallsRow(rec)}
         </div>
     `;
+
+    if (!complete && cnt > 0) {
+        resultDiv.innerHTML += `
+            <div class="decode-honest-note">
+                ⚠️ 已选元素只支撑 ${cnt} 个号码，<b>没有硬凑</b>。
+                想得到更多候选，可以多选几个元素。
+            </div>`;
+    }
 
     // 推荐理由（每个号码为什么被选中）
     resultDiv.innerHTML += renderReasonList(
@@ -1973,6 +2193,15 @@ async function doDecode() {
     traceDiv.innerHTML = data.decode_trace.map(t =>
         `<div class="trace-item">${t}</div>`
     ).join("");
+
+    // V1.9：手动解码同样存入历史（不带图）
+    saveDecodeRecord({
+        vision: null,
+        decode: data,
+        selections: decoderSelections,
+        image: null,
+        source: "手动选元素",
+    });
 }
 
 async function quickDecode() {
