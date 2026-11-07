@@ -1798,3 +1798,52 @@ body {
     color: #f59e0b;
     font-weight: 600;
 }
+
+/* ==================== V1.9.3 下一期开奖日期 ==================== */
+.next-draw-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 11px 16px;
+    margin-bottom: 14px;
+    background: rgba(14, 165, 233, 0.08);
+    border-left: 3px solid #0ea5e9;
+    border-radius: 6px;
+    font-size: 13.5px;
+    color: var(--text-primary, #e2e8f0);
+}
+
+/* 今天/已过期：换成醒目橙色 */
+.next-draw-bar.urgent {
+    background: rgba(245, 158, 11, 0.1);
+    border-left-color: #f59e0b;
+}
+
+.next-draw-bar .nd-icon {
+    font-size: 17px;
+    flex-shrink: 0;
+}
+
+.next-draw-bar .nd-main b {
+    color: #38bdf8;
+}
+
+.next-draw-bar.urgent .nd-main b {
+    color: #f59e0b;
+}
+
+.next-draw-bar .nd-date {
+    font-size: 15px;
+}
+
+.next-draw-bar .nd-note {
+    color: var(--text-secondary);
+    font-size: 12.5px;
+}
+
+.next-draw-bar .nd-hint {
+    margin-left: auto;
+    color: #64748b;
+    font-size: 11.5px;
+}

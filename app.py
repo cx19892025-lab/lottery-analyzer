@@ -24,7 +24,9 @@ from decoder import (
     get_all_categories, decode_elements, quick_decode, zodiac_of_number
 )
 from vision import analyze_image, map_vision_to_decoder_selections
-from crawler import import_all, sync_latest, data_status, data_freshness
+from crawler import (
+    import_all, sync_latest, data_status, data_freshness, next_draw_info
+)
 import settings as settings_mod
 
 # 打包成 exe 后，模板与静态文件在 PyInstaller 的解压目录里，
@@ -202,6 +204,7 @@ def api_data_status():
     st = data_status()
     try:
         st["fresh"] = data_freshness()
+        st["next_draw"] = next_draw_info()
     except Exception as e:
         st["fresh"] = {"known": False, "error": str(e)}
     return jsonify(st)

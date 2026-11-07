@@ -433,6 +433,87 @@ def import_all(clear=True):
     }
 
 
+def next_draw_info():
+    """
+    推算下一期开奖日期 —— 只读本地库，**不联网**。
+
+    用途：开奖记录页顶部显示"下一期预计何时开"，
+    省得用户自己去猜（用户明确要求过）。
+
+    依据：香港六合彩固定**周二 / 周四 / 周六**开奖
+    （本项目 4404 期实测，各年一致；偶有周日/周五的特别场次）。
+
+    ⚠️ 这是**按规律推算**，不是官方公告：
+      历史上确实出现过整期跳过（见 DEVLOG V1.7.3），
+      所以文案用「预计」，不能写成确定日期。
+
+    返回：
+      {
+        "date": "2026-11-07",          下一期预计日期
+        "weekday": "周六",
+        "days_until": 0,               距今几天（0=今天）
+        "is_today": True,
+        "latest_period": "2026117",    当前库内最新期号
+        "latest_date": "2026-11-05",
+        "next_period": "2026118",      预计期号（仅当年序号+1 的推算）
+        "note": "..."                  给用户看的说明
+      }
+    """
+    from datetime import date, timedelta
+
+    DRAW_WEEKDAYS = (1, 3, 5)          # 周一=0 → 周二/四/六
+    WEEK_CN = "一二三四五六日"
+
+    raw = get_raw_results()
+    if not raw:
+        return {"known": False}
+
+    latest_date = date.fromisoformat(raw[0]["draw_date"][:10])
+    latest_period = raw[0]["period"]
+    today = date.today()
+
+    # 从「库内最新一期的次日」开始找第一个应开日。
+    # 用最新一期而非今天作为起点：即使库内数据落后，
+    # 也能算出"紧接着的那一期"，符合用户直觉。
+    cur = latest_date + timedelta(days=1)
+    for _ in range(14):                # 最多找两周，必然命中
+        if cur.weekday() in DRAW_WEEKDAYS:
+            break
+        cur += timedelta(days=1)
+
+    days_until = (cur - today).days
+
+    # 期号推算：同一年内序号 +1；跨年则回到 001。
+    # 这只是"预计"，因为可能跳期，仅供参考。
+    try:
+        year, seq = int(latest_period[:4]), int(latest_period[4:])
+        if cur.year == year:
+            next_period = f"{year}{seq + 1:03d}"
+        else:
+            next_period = f"{cur.year}001"
+    except (ValueError, IndexError):
+        next_period = None
+
+    if days_until > 0:
+        note = f"预计 {days_until} 天后开奖"
+    elif days_until == 0:
+        note = "预计今晚开奖（通常 21:15 截止投注后）"
+    else:
+        note = "按规律该期已过，可能已跳期或数据源尚未更新"
+
+    return {
+        "known": True,
+        "date": cur.isoformat(),
+        "weekday": f"周{WEEK_CN[cur.weekday()]}",
+        "days_until": days_until,
+        "is_today": days_until == 0,
+        "latest_period": latest_period,
+        "latest_date": latest_date.isoformat(),
+        "next_period": next_period,
+        "note": note,
+    }
+
+
 def data_freshness():
     """
     数据新鲜度检查 —— 只读本地库，**不联网**。
