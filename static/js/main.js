@@ -1923,15 +1923,21 @@ async function doVisionDecode(imageDataUrl, mimeType) {
 }
 
 // ==================== 解码历史（V1.9）====================
-// 用户反馈：解码结果刷新页面就没了，想留个记录。
-// 存 localStorage（本机、离线、不需要后端改表），并支持导出 JSON。
+// 用户反馈：解码结果刷新页面就没了，想留个记录，并且能导出成 Word/Excel（带图）。
+// 存 localStorage（本机、离线、不需要后端改表）。
 //
 // 为什么不存后端 SQLite：
-//   解码是轻量、个人化的记录，且可能含用户上传的图片（体积大）。
-//   存浏览器更合适：不污染开奖库、不随包分发、清缓存即清空。
+//   解码是轻量、个人化的记录。存浏览器不污染开奖库、不随包分发、清缓存即清空。
+//
+// V1.9.1 调整：缩略图 160px → **800px 压缩原图**。
+//   160px 存得下 50 条，但导出到 Word/Excel 时图片糊得没法看。
+//   800px + JPEG q0.72 单张约 60~120KB，localStorage 配额 5MB 可放 20~30 条，
+//   超出时按下面的淘汰策略丢最旧的（用户已知悉并接受）。
 const DECODE_HISTORY_KEY = "lottery_decode_history_v1";
-const DECODE_HISTORY_MAX = 50;        // 最多保留条数
-const DECODE_THUMB_MAX = 160;         // 缩略图最长边（px），控制存储体积
+const DECODE_HISTORY_MAX = 50;        // 逻辑上限（配额会先到）
+const DECODE_IMAGE_MAX = 800;         // 存档图最长边（px）
+const DECODE_IMAGE_QUALITY = 0.72;    // JPEG 质量
+const DECODE_THUMB_MAX = 160;         // 列表用小图（从存档图再缩，避免列表卡顿）
 
 let decodeHistoryCache = null;
 
@@ -1951,15 +1957,20 @@ function persistDecodeHistory() {
         localStorage.setItem(DECODE_HISTORY_KEY, JSON.stringify(decodeHistoryCache || []));
         return true;
     } catch (e) {
-        // 配额满（图片多时可能触发）：丢掉最旧的再试一次
-        try {
-            decodeHistoryCache = (decodeHistoryCache || []).slice(0, 10);
-            localStorage.setItem(DECODE_HISTORY_KEY, JSON.stringify(decodeHistoryCache));
-            return true;
-        } catch (e2) {
-            console.warn("解码历史保存失败（存储配额不足）", e2);
-            return false;
+        // 配额满（图片多时必然触发）：逐步丢弃最旧的，直到存得下。
+        // 从尾部砍而不是一次砍到 10 条——尽量多保留记录。
+        let hist = (decodeHistoryCache || []).slice();
+        while (hist.length > 1) {
+            hist = hist.slice(0, Math.max(1, Math.floor(hist.length * 0.7)));
+            try {
+                localStorage.setItem(DECODE_HISTORY_KEY, JSON.stringify(hist));
+                decodeHistoryCache = hist;
+                console.warn(`解码历史超出浏览器存储配额，已保留最近 ${hist.length} 条`);
+                return true;
+            } catch (e2) { /* 继续砍 */ }
         }
+        console.warn("解码历史保存失败（存储配额不足）");
+        return false;
     }
 }
 
@@ -1988,7 +1999,9 @@ function makeThumbnail(dataUrl, maxSide = DECODE_THUMB_MAX) {
 
 async function saveDecodeRecord({ vision, decode, selections, image, source }) {
     const rec = decode && decode.recommended ? decode.recommended : { main: [], special: null };
-    const thumb = await makeThumbnail(image);
+    // 存档图（800px，供导出 Word/Excel 用）+ 列表小图（160px，避免列表卡顿）
+    const stored = image ? await makeThumbnail(image, DECODE_IMAGE_MAX) : null;
+    const thumb = stored ? await makeThumbnail(stored, DECODE_THUMB_MAX) : null;
     const entry = {
         id: Date.now() + "-" + Math.random().toString(36).slice(2, 7),
         time: new Date().toISOString(),
@@ -2000,7 +2013,8 @@ async function saveDecodeRecord({ vision, decode, selections, image, source }) {
         description: (vision && vision.description) || "",
         vision: vision || {},
         selections: selections || {},
-        thumb,
+        thumb,          // 列表用
+        image: stored,  // 导出用（800px）
     };
     const hist = loadDecodeHistory();
     hist.unshift(entry);
@@ -2032,7 +2046,10 @@ function renderDecodeHistory() {
         ].join("");
         const incomplete = !e.is_complete
             ? `<span class="hist-warn">仅 ${e.candidate_count} 个候选</span>` : "";
+        const checked = histSelected.has(e.id) ? "checked" : "";
         return `<div class="hist-item" data-id="${e.id}">
+            <input type="checkbox" class="hist-check" ${checked}
+                   onclick="toggleHistSelect('${e.id}', this.checked)" title="勾选以导出" />
             ${e.thumb ? `<img class="hist-thumb" src="${e.thumb}" alt="" onclick="showHistDetail('${e.id}')" />`
                       : `<div class="hist-thumb hist-thumb-empty">无图</div>`}
             <div class="hist-body" onclick="showHistDetail('${e.id}')">
@@ -2047,6 +2064,37 @@ function renderDecodeHistory() {
             <button type="button" class="hist-del" title="删除" onclick="deleteDecodeRecord('${e.id}')">✕</button>
         </div>`;
     }).join("");
+
+    updateHistSelectionUI();
+}
+
+// ==================== 历史勾选 ====================
+const histSelected = new Set();
+
+function toggleHistSelect(id, on) {
+    if (on) histSelected.add(id); else histSelected.delete(id);
+    updateHistSelectionUI();
+}
+
+function selectAllHist(on) {
+    histSelected.clear();
+    if (on) loadDecodeHistory().forEach(e => histSelected.add(e.id));
+    renderDecodeHistory();
+}
+
+function updateHistSelectionUI() {
+    const bar = document.getElementById("histSelBar");
+    if (!bar) return;
+    const n = histSelected.size;
+    const total = loadDecodeHistory().length;
+    bar.style.display = total ? "flex" : "none";
+    bar.innerHTML = `
+        <label class="hist-sel-all">
+            <input type="checkbox" ${n && n === total ? "checked" : ""}
+                   onclick="selectAllHist(this.checked)" /> 全选
+        </label>
+        <span class="hist-sel-count">已选 ${n} / ${total}</span>
+    `;
 }
 
 function showHistDetail(id) {
@@ -2080,20 +2128,84 @@ function clearDecodeHistory() {
     renderDecodeHistory();
 }
 
-function exportDecodeHistory() {
+// ==================== 导出（V1.9.1）====================
+// 支持 Word / Excel / JSON 三种格式，可全部导出或只导勾选的。
+// Word/Excel 由后端生成（openpyxl / python-docx 已在依赖里），
+// 前端把选中的记录（含 800px 图）POST 过去，拿回二进制文件下载。
+
+function _exportTargets() {
     const hist = loadDecodeHistory();
-    if (!hist.length) { alert("还没有解码记录可导出。"); return; }
-    // 导出时去掉缩略图（体积大且导出后无意义）
-    const out = hist.map(({ thumb, ...rest }) => rest);
-    const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
+    // 有勾选就只导勾选的，没勾选就全导
+    if (histSelected.size) {
+        return hist.filter(e => histSelected.has(e.id));
+    }
+    return hist;
+}
+
+async function exportDecodeHistory(format) {
+    const items = _exportTargets();
+    if (!items.length) { alert("还没有解码记录可导出。"); return; }
+
+    if (format === "json") {
+        // JSON 仍走本地生成（快、不依赖后端）
+        const out = items.map(({ thumb, image, ...rest }) => rest);
+        _downloadBlob(
+            new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }),
+            _stampName("解码历史", "json"));
+        return;
+    }
+
+    const btn = document.getElementById("exportMenuBtn");
+    const old = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "生成中..."; }
+    try {
+        const res = await fetch(`/api/decoder/export?format=${format}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ items }),
+        });
+        if (!res.ok) {
+            let msg = `导出失败（${res.status}）`;
+            try { msg = (await res.json()).error || msg; } catch (e) { /* 非 JSON */ }
+            alert(msg);
+            return;
+        }
+        const blob = await res.blob();
+        _downloadBlob(blob, _stampName("解码记录", format === "word" ? "docx" : "xlsx"));
+    } catch (e) {
+        alert(`导出失败：${e.message}`);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = old; }
+    }
+}
+
+function _stampName(prefix, ext) {
+    const d = new Date();
+    const s = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    return `${prefix}_${s}.${ext}`;
+}
+
+function _downloadBlob(blob, filename) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    const d = new Date();
-    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-    a.download = `解码历史_${stamp}.json`;
+    a.download = filename;
     a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
+
+function toggleExportMenu() {
+    const m = document.getElementById("exportMenu");
+    if (!m) return;
+    m.style.display = m.style.display === "none" ? "block" : "none";
+}
+
+// 点空白处收起导出菜单
+document.addEventListener("click", ev => {
+    const m = document.getElementById("exportMenu");
+    const b = document.getElementById("exportMenuBtn");
+    if (!m || m.style.display === "none") return;
+    if (!m.contains(ev.target) && ev.target !== b) m.style.display = "none";
+});
 
 function syncManualSelections(selections) {
     // 把 AI 识别结果同步到手动选择面板的高亮状态

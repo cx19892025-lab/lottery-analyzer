@@ -81,6 +81,13 @@ def build(include_key=True):
         # 显式声明避免漏收
         "--hidden-import=lunardate",
         "--hidden-import=openai",
+        # 导出 Word/Excel（V1.9.1）：exporters.py 里是延迟 import，
+        # 显式声明避免被当作未使用模块裁掉
+        "--hidden-import=docx",
+        "--hidden-import=openpyxl",
+        "--hidden-import=openpyxl.drawing.image",
+        "--hidden-import=PIL",
+        "--hidden-import=PIL.Image",
         # ⚠️ 不要用 --collect-submodules=pandas/numpy：
         #    会把 pandas.tests.* 整个测试套件拖进来（上千个模块），
         #    体积暴涨且拖慢打包几分钟。这两个包 PyInstaller 自带 hook，无需手动收集。
@@ -102,9 +109,10 @@ def build(include_key=True):
         "--exclude-module=IPython",
         "--exclude-module=notebook",
         "--exclude-module=pytest",
-        "--exclude-module=openpyxl",
-        "--exclude-module=lxml",
-        "--exclude-module=PIL",
+        # ⚠️ 不要排除 openpyxl / lxml / PIL：
+        #    V1.9.1 起「导出解码记录为 Word/Excel（含图）」依赖它们
+        #    （exporters.py → python-docx 需要 lxml，openpyxl 需要 PIL 处理图片）。
+        #    早期版本把这三个都排除了，会导致打包版导出功能直接 ImportError。
         "--exclude-module=PyQt5",
         "--exclude-module=PySide6",
         "--exclude-module=tkinter",
