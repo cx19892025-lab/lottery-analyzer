@@ -231,8 +231,14 @@
 
         <!-- ===== Tab: 开奖记录 ===== -->
         <div class="tab-panel" id="panel-history">
-            <!-- 下一期开奖日期（V1.9.3） -->
+            <!-- 下一期开奖日期 + 同步按钮（V1.9.3 / V1.9.4） -->
             <div class="next-draw-bar" id="nextDrawBar" style="display:none;"></div>
+
+            <div class="hist-sync-row">
+                <button type="button" class="generate-btn" id="historySyncBtn"
+                        onclick="syncFromHistory()">🔄 同步最新开奖</button>
+                <span class="hist-sync-tip" id="historySyncTip"></span>
+            </div>
 
             <div class="card">
                 <div class="card-title"><span class="icon">📋</span> 历史开奖记录</div>
