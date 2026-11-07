@@ -102,6 +102,20 @@ function createBall(num, isSpecial = false) {
 }
 
 /**
+ * 带生肖的球（开奖记录用）。
+ * 生肖表按农历年轮换，所以生肖由**后端按该期开奖日期**算好传过来，
+ * 前端不自己查表——否则跨年那几期会显示错。
+ */
+function createBallWithZodiac(num, zodiac, isSpecial = false) {
+    const color = getBallColor(num);
+    const cls = isSpecial ? `ball ${color} special` : `ball ${color}`;
+    return `<div class="ball-cell">
+        <span class="${cls}">${num}</span>
+        <span class="ball-zodiac">${zodiac || ""}</span>
+    </div>`;
+}
+
+/**
  * 渲染「正码 + 特码」一行。
  * 解码器在候选不足 7 个时会返回 special = null（六合彩七球互异，
  * 宁可不给特码也不能与正码重复），此时不能画出 "+ null" 这种球。
@@ -793,11 +807,12 @@ async function loadHistory() {
 
     body.innerHTML = data.map(r => {
         const nums = [r.num1, r.num2, r.num3, r.num4, r.num5, r.num6];
+        const zs = r.zodiacs || [];
         return `<tr>
             <td style="font-weight:600;">${r.period}</td>
             <td style="color:var(--text-secondary);">${r.draw_date}</td>
-            ${nums.map(n => `<td>${createBall(n)}</td>`).join("")}
-            <td>${createBall(r.special, true)}</td>
+            ${nums.map((n, i) => `<td>${createBallWithZodiac(n, zs[i])}</td>`).join("")}
+            <td>${createBallWithZodiac(r.special, r.special_zodiac, true)}</td>
         </tr>`;
     }).join("");
 }

@@ -1769,3 +1769,32 @@ body {
     cursor: pointer;
     accent-color: #0ea5e9;
 }
+
+/* ==================== V1.9.2 开奖记录：号码下方标生肖 ==================== */
+.ball-cell {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    vertical-align: top;
+}
+
+.ball-cell .ball {
+    /* 表格里球略小一点，给下方的生肖留出空间 */
+    width: 38px;
+    height: 38px;
+    font-size: 15px;
+}
+
+.ball-zodiac {
+    font-size: 11px;
+    line-height: 1;
+    color: var(--text-secondary, #94a3b8);
+    letter-spacing: 0.5px;
+}
+
+/* 特码的生肖用金色，与正码区分 */
+.ball-cell .ball.special + .ball-zodiac {
+    color: #f59e0b;
+    font-weight: 600;
+}
