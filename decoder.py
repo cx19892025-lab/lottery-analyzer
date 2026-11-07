@@ -349,6 +349,9 @@ def decode_elements(selections):
         return {
             "all_candidates": [],
             "recommended": {"main": [], "special": None},
+            "candidate_count": 0,
+            "strong_count": 0,
+            "is_complete": False,
             "decode_trace": trace + ["⚠️ 未选择任何解码元素"],
             "reasons": {},
             "zodiac_table": zinfo,
@@ -361,6 +364,11 @@ def decode_elements(selections):
     # 六合彩是七球同机无放回摇出，**七个号码必然互不相同**，
     # 因此特码绝不能与正码重复（原实现在候选不足 7 个时回退成
     # sorted_candidates[-1]，会与正码撞号，例如「生肖马」给出正码含 49、特码也是 49）。
+    #
+    # V1.9：不再"硬凑一组号"。
+    # 用户明确指出：解出几个就是几个，不要为了凑满 6+1 把弱候选也塞进来。
+    # 因此这里保留"实际有多少候选"的信息，由前端如实展示，
+    # 而不是让 6+1 的固定版式暗示"这就是完整一注"。
     top_nums = [n for n, _ in sorted_candidates[:7]]
     main = sorted(top_nums[:6])
     rest = [n for n in top_nums if n not in main]
@@ -370,9 +378,20 @@ def decode_elements(selections):
         "special": rest[0] if rest else None,
     }
 
+    # —— 诚实度指标：让前端能说清"这组号是怎么来的" ——
+    total = len(sorted_candidates)
+    top_score = sorted_candidates[0][1] if sorted_candidates else 0
+    # 达到最高分 50% 以上的候选，视为"有实质支撑"而非弱噪声
+    strong = [n for n, s in sorted_candidates if s >= top_score * 0.5] if top_score else []
+
     return {
         "all_candidates": [{"number": n, "score": s} for n, s in sorted_candidates],
         "recommended": recommended,
+        # 候选总数与"强候选"数。候选 < 7 时前端应明说"仅识别出 N 个"，
+        # 不要用 6+1 的版式伪装成完整一注。
+        "candidate_count": total,
+        "strong_count": len(strong),
+        "is_complete": total >= 7,
         "decode_trace": trace,
         # 每个号码的命中线索，按权重从高到低 —— 前端据此展示"推荐理由"
         "reasons": {

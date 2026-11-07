@@ -495,6 +495,21 @@
                     <div class="decode-trace" id="decodeTrace">
                         <div class="trace-item" style="color:var(--text-secondary);">等待解码...</div>
                     </div>
+
+                    <!-- ===== 解码历史（V1.9）===== -->
+                    <div class="decode-history-head">
+                        <div class="card-title" style="margin:0;">
+                            <span class="icon">🗂️</span> 解码历史
+                            <span class="hist-count" id="decodeHistCount"></span>
+                        </div>
+                        <div class="hist-actions">
+                            <button type="button" class="mini-btn" onclick="exportDecodeHistory()">⬇️ 导出</button>
+                            <button type="button" class="mini-btn" onclick="clearDecodeHistory()">🗑️ 清空</button>
+                        </div>
+                    </div>
+                    <div class="decode-history" id="decodeHistory">
+                        <div class="hist-empty">还没有保存的解码记录。完成一次解码后会自动保存。</div>
+                    </div>
                 </div>
             </div>
         </div>
