@@ -6,3 +6,7 @@ lunardate>=0.2
 
 # AI 识图（可选）：需要用户自备 OpenAI 兼容接口
 openai>=1.0
+
+# 导出解码记录为 Word / Excel（含图）
+python-docx>=1.0
+openpyxl>=3.1

@@ -503,10 +503,20 @@
                             <span class="hist-count" id="decodeHistCount"></span>
                         </div>
                         <div class="hist-actions">
-                            <button type="button" class="mini-btn" onclick="exportDecodeHistory()">⬇️ 导出</button>
+                            <div class="export-wrap">
+                                <button type="button" class="mini-btn" id="exportMenuBtn"
+                                        onclick="toggleExportMenu()">⬇️ 导出 ▾</button>
+                                <div class="export-menu" id="exportMenu" style="display:none;">
+                                    <div class="export-menu-hint" id="exportMenuHint">未勾选时导出全部</div>
+                                    <button type="button" onclick="exportDecodeHistory('word')">📄 Word（.docx，含图）</button>
+                                    <button type="button" onclick="exportDecodeHistory('excel')">📊 Excel（.xlsx，含图）</button>
+                                    <button type="button" onclick="exportDecodeHistory('json')">🧾 JSON（纯数据）</button>
+                                </div>
+                            </div>
                             <button type="button" class="mini-btn" onclick="clearDecodeHistory()">🗑️ 清空</button>
                         </div>
                     </div>
+                    <div class="hist-sel-bar" id="histSelBar" style="display:none;"></div>
                     <div class="decode-history" id="decodeHistory">
                         <div class="hist-empty">还没有保存的解码记录。完成一次解码后会自动保存。</div>
                     </div>

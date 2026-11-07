@@ -6,9 +6,10 @@ import base64
 import os
 import sys
 import threading
+import time
 import webbrowser
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_file
 from paths import resource_path, is_frozen, user_data_dir, ensure_user_data
 from database import init_db, get_all_results, get_raw_results, get_results_count
 from analyzer import (
@@ -274,6 +275,63 @@ def api_decoder_decode():
     selections = request.get_json()
     result = decode_elements(selections)
     return jsonify(result)
+
+
+@app.route("/api/decoder/export", methods=["POST"])
+def api_decoder_export():
+    """
+    导出解码记录为 Word / Excel（含图）。
+
+    请求体：{"items": [ ...解码记录... ]}，格式见 exporters.py 顶部说明。
+    查询参数：format = word | excel
+
+    前端把 800px 的存档图一并传过来，后端用 python-docx / openpyxl
+    组装成文件流返回，避免浏览器端再引入几百 KB 的 Office 库。
+    """
+    # 注意：不能用 `request.args.get("format") or "word"`——
+    # 传 ?format=（空串）时会静默回退成 word，调用方以为参数生效了。
+    # 只有完全不传 format 才用默认值。
+    fmt = request.args.get("format", "word").lower()
+    if fmt not in ("word", "excel"):
+        return jsonify({"error": f"不支持的导出格式：{fmt}（可选 word / excel）"}), 400
+
+    body = request.get_json(silent=True) or {}
+    items = body.get("items")
+    if not isinstance(items, list) or not items:
+        return jsonify({"error": "没有可导出的记录"}), 400
+
+    # 防止误传超大数组把内存打爆（正常最多 50 条）
+    if len(items) > 500:
+        return jsonify({"error": f"一次最多导出 500 条，当前 {len(items)} 条"}), 400
+
+    try:
+        import exporters
+        if fmt == "word":
+            buf = exporters.build_word(items)
+            mime = ("application/vnd.openxmlformats-officedocument"
+                    ".wordprocessingml.document")
+            ext = "docx"
+        else:
+            buf = exporters.build_excel(items)
+            mime = ("application/vnd.openxmlformats-officedocument"
+                    ".spreadsheetml.sheet")
+            ext = "xlsx"
+    except ImportError as e:
+        return jsonify({
+            "error": f"缺少导出依赖：{e}",
+            "hint": "请执行 pip install python-docx openpyxl",
+        }), 500
+    except Exception as e:
+        return jsonify({"error": f"生成文件失败：{e}"}), 500
+
+    stamp = time.strftime("%Y%m%d")
+    filename = f"decode_records_{stamp}.{ext}"
+    return send_file(
+        buf,
+        mimetype=mime,
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 @app.route("/api/decoder/quick")
