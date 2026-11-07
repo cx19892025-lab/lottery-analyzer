@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import webbrowser
+from datetime import date
 
 from flask import Flask, render_template, jsonify, request, send_file
 from paths import resource_path, is_frozen, user_data_dir, ensure_user_data
@@ -19,7 +20,9 @@ from analyzer import (
     cold_chase_backtest, smart_recommend, get_dashboard_data
 )
 from backtest import run_backtest, STRATEGIES, MIN_HISTORY
-from decoder import get_all_categories, decode_elements, quick_decode
+from decoder import (
+    get_all_categories, decode_elements, quick_decode, zodiac_of_number
+)
 from vision import analyze_image, map_vision_to_decoder_selections
 from crawler import import_all, sync_latest, data_status, data_freshness
 import settings as settings_mod
@@ -64,10 +67,25 @@ def api_history():
 
     用 get_raw_results 而非 get_all_results：这里要展示**全部**原始记录，
     包括 1993~2002 那段 48/49 号缺失的期（统计时会排除，但列表应如实呈现）。
+
+    V1.9.2：每条记录附带每个号码的**生肖**。
+    ⚠️ 生肖表按农历年轮换，所以必须用**该期自己的开奖日期**换算，
+       不能拿今天的表套历史数据（否则跨年那几期会算错）。
+       实测 2026 年 1 月的开奖仍属上一生肖年。
     """
     limit = request.args.get("limit", 50, type=int)
     results = get_raw_results(limit)
-    return jsonify(results)
+
+    out = []
+    for r in results:
+        d = date.fromisoformat(r["draw_date"][:10])
+        item = dict(r)
+        item["zodiacs"] = [
+            zodiac_of_number(int(r[f"num{i}"]), d) for i in range(1, 7)
+        ]
+        item["special_zodiac"] = zodiac_of_number(int(r["special"]), d)
+        out.append(item)
+    return jsonify(out)
 
 
 @app.route("/api/frequency")
